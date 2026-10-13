@@ -30,6 +30,7 @@ enum Action {
     Jump,
     Lazygit,
     Nvim,
+    Pr,
     Remove,
 }
 
@@ -159,6 +160,11 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         }
         return None;
     }
+    if app.help {
+        // Any key closes the help; ctrl+c still quits.
+        app.help = false;
+        return (ctrl && k.code == KeyCode::Char('c')).then_some(Action::Quit);
+    }
     match k.code {
         KeyCode::Char('c') if ctrl => return Some(Action::Quit),
         _ if ctrl => {}
@@ -168,7 +174,9 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         KeyCode::Enter => return Some(Action::Jump),
         KeyCode::Char('l') => return Some(Action::Lazygit),
         KeyCode::Char('v') => return Some(Action::Nvim),
+        KeyCode::Char('g') => return Some(Action::Pr),
         KeyCode::Char('r') => return Some(Action::Remove),
+        KeyCode::Char('?') => app.help = true,
         KeyCode::Char('q') => return Some(Action::Quit),
         _ => {}
     }
@@ -223,6 +231,13 @@ fn run_external(action: &Action, a: &Agent) {
         }
         Action::Nvim => {
             let _ = Command::new("nvim").arg(".").current_dir(workdir).status();
+        }
+        Action::Pr => {
+            // Open the branch's PR, or the create-PR page if there is none yet.
+            let open = |args: &[&str]| Command::new("gh").args(args).current_dir(workdir).status().is_ok_and(|s| s.success());
+            if !open(&["pr", "view", "--web"]) && !open(&["pr", "create", "--web"]) {
+                ask("gh could not open a PR, press enter to go back");
+            }
         }
         Action::Remove if a.is_main_checkout() => {
             if ask(&format!("Close agent {} (main checkout, no worktree to remove)? [y/N] ", a.name())) == "y" {

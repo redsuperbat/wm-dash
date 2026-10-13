@@ -194,6 +194,8 @@ pub struct App {
     pub agents: Vec<Agent>,
     pub sel: usize,
     pub insert: bool,
+    /// The key help popover is open.
+    pub help: bool,
     pub preview: Option<Preview>,
 }
 

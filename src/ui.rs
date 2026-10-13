@@ -2,10 +2,23 @@ use crate::app::{self, App};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
-const HINTS: &str = " j/k · i insert · enter jump · l lazygit · v nvim · r remove · q quit";
+const HINTS: &str = " ? keys · q quit";
+
+const KEYS: &[(&str, &str)] = &[
+    ("j/k ↑/↓", "move the selection"),
+    ("i", "insert mode: keys go to the agent"),
+    ("ctrl+q", "back to the list from insert mode"),
+    ("enter", "jump to the agent's pane and quit"),
+    ("l", "lazygit in the agent's workdir"),
+    ("v", "nvim in the agent's workdir"),
+    ("g", "open the branch's PR on GitHub"),
+    ("r", "remove the agent and its worktree"),
+    ("?", "show this help"),
+    ("q ctrl+c", "quit"),
+];
 
 /// Width of the agent list column.
 pub fn list_width(width: u16) -> u16 {
@@ -43,6 +56,20 @@ pub fn draw(f: &mut Frame, app: &App) {
     {
         f.set_cursor_position((inner.x + x, inner.y + y));
     }
+    if app.help {
+        draw_help(f, area);
+    }
+}
+
+/// Centered box listing every key; any key closes it.
+fn draw_help(f: &mut Frame, area: Rect) {
+    let text: Vec<String> = KEYS.iter().map(|(k, what)| format!(" {k:<9} {what}")).collect();
+    let width = (text.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16 + 3).min(area.width);
+    let height = (text.len() as u16 + 2).min(area.height);
+    let r = Rect { x: area.x + (area.width - width) / 2, y: area.y + (area.height - height) / 2, width, height };
+    let block = Block::bordered().border_type(BorderType::Rounded).title(" keys · any key closes ");
+    f.render_widget(Clear, r);
+    f.render_widget(Paragraph::new(text.join("\n")).block(block), r);
 }
 
 /// Each agent takes 2 rows: icon + name, then title. Scroll so the selection stays visible.

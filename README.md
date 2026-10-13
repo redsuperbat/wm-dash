@@ -21,7 +21,9 @@ In the list:
 | `enter` | Jump to the agent's pane and quit |
 | `l` | Open lazygit in the agent's working directory |
 | `v` | Open nvim in the agent's working directory |
+| `g` | Open the branch's GitHub PR in the browser, or the page to create one |
 | `r` | Remove the agent and its worktree (asks first) |
+| `?` | Show all keys |
 | `q`, `ctrl+c` | Quit |
 
 In insert mode, every key and paste goes to the agent. `ctrl+q` takes you back to the list.
