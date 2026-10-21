@@ -72,18 +72,18 @@ fn draw_help(f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(text.join("\n")).block(block), r);
 }
 
-/// Each agent takes 2 rows: icon + name, then title. Scroll so the selection stays visible.
+/// Each agent takes 2 rows: icon + title, then branch. Scroll so the selection stays visible.
 fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let h = area.height as usize;
     let off = (app.sel + 1).saturating_sub(h.saturating_sub(1) / 2);
     for r in 0..h {
         let n = off + r / 2;
         let (text, style) = match app.agents.get(n) {
-            Some(a) if r % 2 == 0 => (format!(" {} {}", a.status().icon(), a.name()), Style::new()),
-            Some(a) => {
+            Some(a) if r % 2 == 0 => {
                 let title = app::clean_title(a.title.as_deref().unwrap_or_default());
-                (format!("    {title}"), Style::new().dim())
+                (format!(" {} {title}", a.status().icon()), Style::new())
             }
+            Some(a) => (format!("    \u{e0a0} {}", a.name()), Style::new().dim()),
             None if r == h - 1 => (HINTS.into(), Style::new().dim()),
             None => continue,
         };
@@ -122,5 +122,24 @@ mod tests {
         assert_eq!(super::shorten("abcd", 3), "ab…");
         assert_eq!(super::shorten(" 🤖 x", 3), " …");
         assert_eq!(super::shorten("abc", 0), "");
+    }
+
+    #[test]
+    fn list_rows() {
+        let agent = crate::app::Agent {
+            status: Some("working".into()),
+            project: Some("p".into()),
+            worktree: "feat".into(),
+            title: Some("✳ Fix login".into()),
+            ..Default::default()
+        };
+        let app = crate::app::App { agents: vec![agent], ..Default::default() };
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 3)).unwrap();
+        term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
+        let buf = term.backend().buffer();
+        let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
+        // The emoji is 2 cells wide, so its second cell reads as an extra space.
+        assert!(row(0).starts_with(" 🤖  Fix login"), "{:?}", row(0));
+        assert!(row(1).starts_with("    \u{e0a0} p/feat"), "{:?}", row(1));
     }
 }
