@@ -230,7 +230,7 @@ fn run_external(action: &Action, a: &Agent) {
             let _ = Command::new("lazygit").args(["-p", workdir]).status();
         }
         Action::Nvim => {
-            let _ = Command::new("nvim").arg(".").current_dir(workdir).status();
+            let _ = Command::new("nvim").current_dir(workdir).status();
         }
         Action::Pr => {
             // Open the branch's PR, or the create-PR page if there is none yet.
