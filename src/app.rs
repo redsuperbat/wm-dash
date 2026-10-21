@@ -68,8 +68,9 @@ impl Agent {
     }
 }
 
+/// Grouped by project, then by status inside each project.
 pub fn sort_agents(agents: &mut [Agent]) {
-    agents.sort_by_cached_key(|a| (a.status(), a.name()));
+    agents.sort_by_cached_key(|a| (a.project.clone(), a.status(), a.worktree.clone()));
 }
 
 /// Claude Code prefixes titles with ✳ or a spinner char; drop leading non-letter/non-digit symbols.
@@ -255,8 +256,8 @@ mod tests {
         ];
         sort_agents(&mut agents);
         let ids: Vec<_> = agents.iter().map(|a| a.pane_id.as_str()).collect();
-        assert_eq!(ids, ["%7", "%4", "%3", "%5", "%6", "%1", "%2"]);
-        assert_eq!(agents[3].status().icon(), "⏳");
+        assert_eq!(ids, ["%7", "%5", "%6", "%2", "%4", "%1", "%3"]);
+        assert_eq!(agents[1].status().icon(), "⏳");
     }
 
     #[test]

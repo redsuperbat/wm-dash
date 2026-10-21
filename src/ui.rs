@@ -72,22 +72,33 @@ fn draw_help(f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(text.join("\n")).block(block), r);
 }
 
-/// Each agent takes 2 rows: icon + title, then branch. Scroll so the selection stays visible.
+/// A header row per project, then 2 rows per agent: icon + title, then branch.
+/// Scroll so the selection stays visible.
 fn draw_list(f: &mut Frame, app: &App, area: Rect) {
-    let h = area.height as usize;
-    let off = (app.sel + 1).saturating_sub(h.saturating_sub(1) / 2);
-    for r in 0..h {
-        let n = off + r / 2;
-        let (text, style) = match app.agents.get(n) {
-            Some(a) if r % 2 == 0 => {
-                let title = app::clean_title(a.title.as_deref().unwrap_or_default());
-                (format!(" {} {title}", a.status().icon()), Style::new())
+    // (text, style, agent index)
+    let mut rows: Vec<(String, Style, Option<usize>)> = Vec::new();
+    for (n, a) in app.agents.iter().enumerate() {
+        if n == 0 || app.agents[n - 1].project != a.project {
+            if n > 0 {
+                rows.push((String::new(), Style::new(), None));
             }
-            Some(a) => (format!("    \u{e0a0} {}", a.name()), Style::new().dim()),
+            rows.push((format!(" {}", a.project.as_deref().unwrap_or("other")), Style::new().bold(), None));
+        }
+        let title = app::clean_title(a.title.as_deref().unwrap_or_default());
+        rows.push((format!(" {} {title}", a.status().icon()), Style::new(), Some(n)));
+        rows.push((format!("    \u{e0a0} {}", a.worktree), Style::new().dim(), Some(n)));
+    }
+    let h = area.height as usize;
+    let sel_row = rows.iter().position(|r| r.2 == Some(app.sel)).unwrap_or(0);
+    // Keep both of the selection's rows above the last row.
+    let off = (sel_row + 3).saturating_sub(h);
+    for r in 0..h {
+        let (text, style) = match rows.get(off + r) {
+            Some((_, _, Some(n))) if *n == app.sel => (rows[off + r].0.clone(), Style::new().add_modifier(Modifier::REVERSED)),
+            Some((text, style, _)) => (text.clone(), *style),
             None if r == h - 1 => (HINTS.into(), Style::new().dim()),
             None => continue,
         };
-        let style = if n == app.sel && n < app.agents.len() { Style::new().add_modifier(Modifier::REVERSED) } else { style };
         let row = Rect { y: area.y + r as u16, height: 1, ..area };
         f.render_widget(Paragraph::new(shorten(&text, area.width as usize)).style(style), row);
     }
@@ -134,12 +145,13 @@ mod tests {
             ..Default::default()
         };
         let app = crate::app::App { agents: vec![agent], ..Default::default() };
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 3)).unwrap();
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 4)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
         let buf = term.backend().buffer();
         let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
+        assert!(row(0).starts_with(" p "), "{:?}", row(0));
         // The emoji is 2 cells wide, so its second cell reads as an extra space.
-        assert!(row(0).starts_with(" 🤖  Fix login"), "{:?}", row(0));
-        assert!(row(1).starts_with("    \u{e0a0} p/feat"), "{:?}", row(1));
+        assert!(row(1).starts_with(" 🤖  Fix login"), "{:?}", row(1));
+        assert!(row(2).starts_with("    \u{e0a0} feat"), "{:?}", row(2));
     }
 }
