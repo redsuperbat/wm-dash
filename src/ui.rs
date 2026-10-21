@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthChar;
 const HINTS: &str = " ? keys · q quit";
 
 const KEYS: &[(&str, &str)] = &[
-    ("j/k ↑/↓", "move the selection"),
+    ("j/k ↑/↓", "move the selection (or click an agent)"),
     ("pgup/pgdn", "scroll the preview (or the mouse wheel)"),
     ("i", "insert mode: keys go to the agent"),
     ("ctrl+q", "back to the list from insert mode"),
@@ -74,10 +74,9 @@ fn draw_help(f: &mut Frame, area: Rect) {
 }
 
 /// A header row per project, then 2 rows per agent: icon + title, then branch.
-/// Scroll so the selection stays visible.
-fn draw_list(f: &mut Frame, app: &App, area: Rect) {
-    // (text, style, agent index)
-    let mut rows: Vec<(String, Style, Option<usize>)> = Vec::new();
+/// Each row is (text, style, agent index).
+fn list_rows(app: &App) -> Vec<(String, Style, Option<usize>)> {
+    let mut rows = Vec::new();
     for (n, a) in app.agents.iter().enumerate() {
         if n == 0 || app.agents[n - 1].project != a.project {
             rows.push((format!(" {}", a.project.as_deref().unwrap_or("other")), Style::new().bold(), None));
@@ -87,10 +86,26 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
         let branch = a.branch.as_deref().unwrap_or(&a.worktree);
         rows.push((format!("    \u{e0a0} {branch}"), Style::new().dim(), Some(n)));
     }
+    rows
+}
+
+/// First list row shown, scrolled so both of the selection's rows stay above the last row.
+fn list_offset(rows: &[(String, Style, Option<usize>)], sel: usize, height: u16) -> usize {
+    let sel_row = rows.iter().position(|r| r.2 == Some(sel)).unwrap_or(0);
+    (sel_row + 3).saturating_sub(height as usize)
+}
+
+/// The agent drawn at screen row `y` of the list, if any.
+pub fn agent_at(app: &App, area: Rect, y: u16) -> Option<usize> {
+    let rows = list_rows(app);
+    let off = list_offset(&rows, app.sel, area.height);
+    rows.get(off + y.checked_sub(area.y)? as usize)?.2
+}
+
+fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+    let rows = list_rows(app);
     let h = area.height as usize;
-    let sel_row = rows.iter().position(|r| r.2 == Some(app.sel)).unwrap_or(0);
-    // Keep both of the selection's rows above the last row.
-    let off = (sel_row + 3).saturating_sub(h);
+    let off = list_offset(&rows, app.sel, area.height);
     for r in 0..h {
         let (text, style) = match rows.get(off + r) {
             Some((_, _, Some(n))) if *n == app.sel => (rows[off + r].0.clone(), Style::new().add_modifier(Modifier::REVERSED)),
@@ -163,5 +178,11 @@ mod tests {
         // The next group's header follows right away, with no blank row.
         assert!(row(3).starts_with(" q "), "{:?}", row(3));
         assert!(row(5).starts_with("    \u{e0a0} wt2"), "{:?}", row(5));
+
+        let area = ratatui::layout::Rect::new(0, 0, 20, 7);
+        assert_eq!(super::agent_at(&app, area, 0), None);
+        assert_eq!(super::agent_at(&app, area, 2), Some(0));
+        assert_eq!(super::agent_at(&app, area, 4), Some(1));
+        assert_eq!(super::agent_at(&app, area, 6), None);
     }
 }

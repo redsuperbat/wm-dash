@@ -8,7 +8,7 @@ use anyhow::Result;
 use app::{Agent, App, Preview};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, MouseEventKind,
+    KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
@@ -112,6 +112,15 @@ fn run() -> Result<()> {
                 Msg::Term(Event::Paste(text)) if app.insert => {
                     if let Some(a) = app.selected() {
                         tmux::paste(&a.pane_id, &text);
+                    }
+                }
+                Msg::Term(Event::Mouse(m))
+                    if m.kind == MouseEventKind::Down(MouseButton::Left)
+                        && m.column < ui::list_width(terminal.size()?.width) =>
+                {
+                    // A click in the list selects the agent under it.
+                    if let Some(n) = ui::agent_at(&app, terminal.size()?.into(), m.row) {
+                        app.sel = n;
                     }
                 }
                 Msg::Term(Event::Mouse(m)) => {
