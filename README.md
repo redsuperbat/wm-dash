@@ -18,6 +18,7 @@ In the list:
 | --- | --- |
 | `j` / `k`, arrows | Move the selection |
 | `PgUp` / `PgDn`, mouse wheel | Scroll the preview (scrolls the agent's own pane) |
+| Mouse over the preview | Select text and click, as in the agent's pane |
 | `i` | Insert mode: keys go to the agent |
 | `enter` | Jump to the agent's pane and quit |
 | `l` | Open lazygit in the agent's working directory |

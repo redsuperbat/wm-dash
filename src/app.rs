@@ -1,6 +1,6 @@
 //! Plain data types and pure logic: no I/O here, so it is easy to test and extend.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::text::Text;
 use serde::Deserialize;
 use std::ops::Range;
@@ -130,9 +130,30 @@ pub fn is_blank(line: &str) -> bool {
     true
 }
 
-/// An SGR mouse wheel event at 0-based (`x`, `y`), as a terminal sends it to a program.
-pub fn wheel_seq(up: bool, x: u16, y: u16) -> String {
-    format!("\x1b[<{};{};{}M", if up { 64 } else { 65 }, x + 1, y + 1)
+/// A mouse event at 0-based (`x`, `y`) in SGR form, as a terminal sends it to a program.
+/// None for plain moves, which nothing in the agent needs.
+pub fn mouse_seq(kind: MouseEventKind, mods: KeyModifiers, x: u16, y: u16) -> Option<String> {
+    let button = |b| match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let (mut code, end) = match kind {
+        MouseEventKind::Down(b) => (button(b), 'M'),
+        MouseEventKind::Up(b) => (button(b), 'm'),
+        MouseEventKind::Drag(b) => (button(b) + 32, 'M'),
+        MouseEventKind::ScrollUp => (64, 'M'),
+        MouseEventKind::ScrollDown => (65, 'M'),
+        MouseEventKind::ScrollLeft => (66, 'M'),
+        MouseEventKind::ScrollRight => (67, 'M'),
+        MouseEventKind::Moved => return None,
+    };
+    for (m, bit) in [(KeyModifiers::SHIFT, 4), (KeyModifiers::ALT, 8), (KeyModifiers::CONTROL, 16)] {
+        if mods.contains(m) {
+            code += bit;
+        }
+    }
+    Some(format!("\x1b[<{code};{};{}{end}", x + 1, y + 1))
 }
 
 /// Drop OSC sequences, like OSC 8 links (`ESC ] … ESC \` or `… BEL`). ansi-to-tui stops parsing the
@@ -339,9 +360,16 @@ mod tests {
     }
 
     #[test]
-    fn wheel_seq() {
-        assert_eq!(super::wheel_seq(true, 0, 0), "\x1b[<64;1;1M");
-        assert_eq!(super::wheel_seq(false, 9, 4), "\x1b[<65;10;5M");
+    fn mouse_seq() {
+        let seq = |k, m| super::mouse_seq(k, m, 9, 4);
+        let none = KeyModifiers::NONE;
+        assert_eq!(super::mouse_seq(MouseEventKind::ScrollUp, none, 0, 0).unwrap(), "\x1b[<64;1;1M");
+        assert_eq!(seq(MouseEventKind::ScrollDown, none).unwrap(), "\x1b[<65;10;5M");
+        assert_eq!(seq(MouseEventKind::Down(MouseButton::Left), none).unwrap(), "\x1b[<0;10;5M");
+        assert_eq!(seq(MouseEventKind::Drag(MouseButton::Left), none).unwrap(), "\x1b[<32;10;5M");
+        assert_eq!(seq(MouseEventKind::Up(MouseButton::Left), none).unwrap(), "\x1b[<0;10;5m");
+        assert_eq!(seq(MouseEventKind::Down(MouseButton::Right), KeyModifiers::SHIFT).unwrap(), "\x1b[<6;10;5M");
+        assert_eq!(seq(MouseEventKind::Moved, none), None);
     }
 
     #[test]

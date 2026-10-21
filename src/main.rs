@@ -115,16 +115,18 @@ fn run() -> Result<()> {
                     }
                 }
                 Msg::Term(Event::Mouse(m)) => {
-                    let up = match m.kind {
-                        MouseEventKind::ScrollUp => true,
-                        MouseEventKind::ScrollDown => false,
-                        _ => continue,
-                    };
-                    // Pass the wheel to the agent at the same spot inside its pane.
+                    // Pass the mouse to the agent at the same spot inside its pane, so scrolling,
+                    // selecting text and clicking work as in the pane itself. Only presses and the
+                    // wheel must start over the preview; drags and releases always go through so a
+                    // selection dragged out of the preview still ends.
                     let boxed = ui::preview_area(terminal.size()?.into());
+                    let over = m.column > boxed.x && m.row > boxed.y;
+                    let starts = !matches!(m.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_));
                     let (x, y) = (m.column.saturating_sub(boxed.x + 1), m.row.saturating_sub(boxed.y + 1));
-                    if let Some(a) = app.selected().filter(|_| m.column > boxed.x) {
-                        tmux::send_text(&a.pane_id, &app::wheel_seq(up, x, y));
+                    if let (Some(a), Some(seq)) = (app.selected(), app::mouse_seq(m.kind, m.modifiers, x, y))
+                        && (over || !starts)
+                    {
+                        tmux::send_text(&a.pane_id, &seq);
                     }
                 }
                 Msg::Term(_) => {}
