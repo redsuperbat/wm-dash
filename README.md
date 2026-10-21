@@ -17,6 +17,7 @@ In the list:
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows | Move the selection |
+| `PgUp` / `PgDn`, mouse wheel | Scroll the preview (scrolls the agent's own pane) |
 | `i` | Insert mode: keys go to the agent |
 | `enter` | Jump to the agent's pane and quit |
 | `l` | Open lazygit in the agent's working directory |

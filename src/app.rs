@@ -130,6 +130,11 @@ pub fn is_blank(line: &str) -> bool {
     true
 }
 
+/// An SGR mouse wheel event at 0-based (`x`, `y`), as a terminal sends it to a program.
+pub fn wheel_seq(up: bool, x: u16, y: u16) -> String {
+    format!("\x1b[<{};{};{}M", if up { 64 } else { 65 }, x + 1, y + 1)
+}
+
 /// Drop OSC sequences, like OSC 8 links (`ESC ] … ESC \` or `… BEL`). ansi-to-tui stops parsing the
 /// line at the `ESC \` form, so the link and the rest of the line would vanish.
 pub fn strip_osc(line: &str) -> String {
@@ -331,6 +336,12 @@ mod tests {
         assert_eq!(k(KeyCode::BackTab, KeyModifiers::SHIFT).unwrap(), "BTab");
         assert_eq!(k(KeyCode::F(5), KeyModifiers::NONE).unwrap(), "F5");
         assert_eq!(k(KeyCode::CapsLock, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn wheel_seq() {
+        assert_eq!(super::wheel_seq(true, 0, 0), "\x1b[<64;1;1M");
+        assert_eq!(super::wheel_seq(false, 9, 4), "\x1b[<65;10;5M");
     }
 
     #[test]

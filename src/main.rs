@@ -6,7 +6,10 @@ mod ui;
 
 use anyhow::Result;
 use app::{Agent, App, Preview};
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
@@ -36,13 +39,13 @@ enum Action {
 
 fn tui_on() -> Result<()> {
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(stdout(), EnterAlternateScreen, EnableBracketedPaste, EnableMouseCapture)?;
     Ok(())
 }
 
 fn tui_off() {
     let _ = disable_raw_mode();
-    let _ = execute!(stdout(), DisableBracketedPaste, crossterm::cursor::Show, LeaveAlternateScreen);
+    let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture, crossterm::cursor::Show, LeaveAlternateScreen);
 }
 
 /// Undo the fit and give the terminal back. Safe to call more than once.
@@ -111,6 +114,19 @@ fn run() -> Result<()> {
                         tmux::paste(&a.pane_id, &text);
                     }
                 }
+                Msg::Term(Event::Mouse(m)) => {
+                    let up = match m.kind {
+                        MouseEventKind::ScrollUp => true,
+                        MouseEventKind::ScrollDown => false,
+                        _ => continue,
+                    };
+                    // Pass the wheel to the agent at the same spot inside its pane.
+                    let boxed = ui::preview_area(terminal.size()?.into());
+                    let (x, y) = (m.column.saturating_sub(boxed.x + 1), m.row.saturating_sub(boxed.y + 1));
+                    if let Some(a) = app.selected().filter(|_| m.column > boxed.x) {
+                        tmux::send_text(&a.pane_id, &app::wheel_seq(up, x, y));
+                    }
+                }
                 Msg::Term(_) => {}
             }
             if action.is_some() {
@@ -170,6 +186,11 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         _ if ctrl => {}
         KeyCode::Char('j') | KeyCode::Down => app.move_sel(true),
         KeyCode::Char('k') | KeyCode::Up => app.move_sel(false),
+        KeyCode::PageUp | KeyCode::PageDown => {
+            if let (Some(a), Some(key)) = (app.selected(), app::tmux_key(k)) {
+                tmux::send_key(&a.pane_id, &key);
+            }
+        }
         KeyCode::Char('i') => app.insert = app.selected().is_some(),
         KeyCode::Enter => return Some(Action::Jump),
         KeyCode::Char('l') => return Some(Action::Lazygit),

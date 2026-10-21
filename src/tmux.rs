@@ -184,6 +184,11 @@ pub fn send_key(pane: &str, key: &str) {
     tmux(&["send-keys", "-t", pane, key]);
 }
 
+/// Type `text` into the pane as is, escape sequences included.
+pub fn send_text(pane: &str, text: &str) {
+    tmux(&["send-keys", "-t", pane, "-l", text]);
+}
+
 /// Paste as the terminal would: bracketed if the agent asked for it.
 pub fn paste(pane: &str, text: &str) {
     let Ok(mut child) = Command::new("tmux")

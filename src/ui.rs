@@ -9,6 +9,7 @@ const HINTS: &str = " ? keys · q quit";
 
 const KEYS: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move the selection"),
+    ("pgup/pgdn", "scroll the preview (or the mouse wheel)"),
     ("i", "insert mode: keys go to the agent"),
     ("ctrl+q", "back to the list from insert mode"),
     ("enter", "jump to the agent's pane and quit"),
