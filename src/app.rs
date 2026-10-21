@@ -130,6 +130,21 @@ pub fn is_blank(line: &str) -> bool {
     true
 }
 
+/// Drop OSC sequences, like OSC 8 links (`ESC ] … ESC \` or `… BEL`). ansi-to-tui stops parsing the
+/// line at the `ESC \` form, so the link and the rest of the line would vanish.
+pub fn strip_osc(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(i) = rest.find("\x1b]") {
+        out.push_str(&rest[..i]);
+        rest = &rest[i + 2..];
+        rest = &rest[rest.find(['\x07', '\x1b']).unwrap_or(rest.len())..];
+        rest = rest.strip_prefix('\x07').or_else(|| rest.strip_prefix("\x1b\\")).unwrap_or(rest);
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Rows of the pane to show: ending at the last non-blank line or the cursor line, whichever is
 /// lower, and at most `height` rows.
 pub fn crop(lines: &[&str], cursor_y: usize, height: usize) -> Range<usize> {
@@ -316,6 +331,14 @@ mod tests {
         assert_eq!(k(KeyCode::BackTab, KeyModifiers::SHIFT).unwrap(), "BTab");
         assert_eq!(k(KeyCode::F(5), KeyModifiers::NONE).unwrap(), "F5");
         assert_eq!(k(KeyCode::CapsLock, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn strip_osc() {
+        let link = "a \x1b[94m\x1b]8;id=1;https://x.com\x1b\\https://x.com\x1b[39m\x1b]8;;\x1b\\ b";
+        assert_eq!(super::strip_osc(link), "a \x1b[94mhttps://x.com\x1b[39m b");
+        assert_eq!(super::strip_osc("x\x1b]0;title\x07y"), "xy");
+        assert_eq!(super::strip_osc("plain"), "plain");
     }
 
     #[test]

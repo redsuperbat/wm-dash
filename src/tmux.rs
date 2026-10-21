@@ -116,7 +116,7 @@ fn capture(r: &PreviewReq) -> Option<(String, Preview)> {
     let mut text = ratatui::text::Text::default();
     for l in shown {
         // Parse line by line so a style never leaks onto the next row.
-        text.lines.extend(l.into_text().map(|t| t.lines).unwrap_or_default());
+        text.lines.extend(app::strip_osc(l).into_text().map(|t| t.lines).unwrap_or_default());
     }
     let raw = format!("{cursor:?}{}", shown.join("\n"));
     Some((raw, Preview { pane: r.pane.clone(), text, cursor }))
