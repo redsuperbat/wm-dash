@@ -13,6 +13,7 @@ pub struct Agent {
     pub status: Option<String>,
     pub project: Option<String>,
     pub worktree: String,
+    pub branch: Option<String>,
     pub title: Option<String>,
     pub project_path: Option<String>,
     pub workdir: Option<String>,
@@ -315,6 +316,12 @@ mod tests {
         assert_eq!(k(KeyCode::BackTab, KeyModifiers::SHIFT).unwrap(), "BTab");
         assert_eq!(k(KeyCode::F(5), KeyModifiers::NONE).unwrap(), "F5");
         assert_eq!(k(KeyCode::CapsLock, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn reads_branch_from_workmux() {
+        let a: Agent = serde_json::from_str(r#"{"pane_id":"%1","worktree":"wm-dash","branch":"main"}"#).unwrap();
+        assert_eq!(a.branch.as_deref(), Some("main"));
     }
 
     #[test]

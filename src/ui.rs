@@ -79,14 +79,12 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let mut rows: Vec<(String, Style, Option<usize>)> = Vec::new();
     for (n, a) in app.agents.iter().enumerate() {
         if n == 0 || app.agents[n - 1].project != a.project {
-            if n > 0 {
-                rows.push((String::new(), Style::new(), None));
-            }
             rows.push((format!(" {}", a.project.as_deref().unwrap_or("other")), Style::new().bold(), None));
         }
         let title = app::clean_title(a.title.as_deref().unwrap_or_default());
         rows.push((format!(" {} {title}", a.status().icon()), Style::new(), Some(n)));
-        rows.push((format!("    \u{e0a0} {}", a.worktree), Style::new().dim(), Some(n)));
+        let branch = a.branch.as_deref().unwrap_or(&a.worktree);
+        rows.push((format!("    \u{e0a0} {branch}"), Style::new().dim(), Some(n)));
     }
     let h = area.height as usize;
     let sel_row = rows.iter().position(|r| r.2 == Some(app.sel)).unwrap_or(0);
@@ -140,12 +138,20 @@ mod tests {
         let agent = crate::app::Agent {
             status: Some("working".into()),
             project: Some("p".into()),
-            worktree: "feat".into(),
+            worktree: "wt".into(),
+            branch: Some("feat".into()),
             title: Some("✳ Fix login".into()),
             ..Default::default()
         };
-        let app = crate::app::App { agents: vec![agent], ..Default::default() };
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 4)).unwrap();
+        // No branch from workmux: falls back to the worktree name.
+        let other = crate::app::Agent {
+            project: Some("q".into()),
+            worktree: "wt2".into(),
+            title: Some("Docs".into()),
+            ..Default::default()
+        };
+        let app = crate::app::App { agents: vec![agent, other], ..Default::default() };
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 7)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
         let buf = term.backend().buffer();
         let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
@@ -153,5 +159,8 @@ mod tests {
         // The emoji is 2 cells wide, so its second cell reads as an extra space.
         assert!(row(1).starts_with(" 🤖  Fix login"), "{:?}", row(1));
         assert!(row(2).starts_with("    \u{e0a0} feat"), "{:?}", row(2));
+        // The next group's header follows right away, with no blank row.
+        assert!(row(3).starts_with(" q "), "{:?}", row(3));
+        assert!(row(5).starts_with("    \u{e0a0} wt2"), "{:?}", row(5));
     }
 }
