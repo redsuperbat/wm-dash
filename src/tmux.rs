@@ -182,7 +182,7 @@ pub fn set_fitting(on: bool) {
 
 /// Split the agent's pane and start another agent beside it in the same directory. The command
 /// is typed into a fresh shell, as workmux does, so the shell and direnv set things up first.
-/// Returns the new pane.
+/// `; exit` closes the pane when the agent quits. Returns the new pane.
 pub fn new_agent(a: &Agent) -> Option<String> {
     let read = |path: &str| std::fs::read_to_string(path.trim()).ok();
     let project = a.project_path.as_deref().and_then(|p| read(&format!("{p}/.workmux.yaml")));
@@ -193,7 +193,8 @@ pub fn new_agent(a: &Agent) -> Option<String> {
     let dir = a.workdir.as_deref().unwrap_or("#{pane_current_path}");
     let split = ["split-window", "-dh", "-t", &a.pane_id, "-c", dir, "-P", "-F", "#{pane_id}"];
     let pane = tmux(&split)?.trim().to_string();
-    tmux(&["send-keys", "-t", &pane, "-l", cmd.unwrap_or("claude"), ";", "send-keys", "-t", &pane, "Enter"]);
+    let cmd = format!("{}; exit", cmd.unwrap_or("claude"));
+    tmux(&["send-keys", "-t", &pane, "-l", &cmd, ";", "send-keys", "-t", &pane, "Enter"]);
     Some(pane)
 }
 
