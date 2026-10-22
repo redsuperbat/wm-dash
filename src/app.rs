@@ -1,6 +1,7 @@
 //! Plain data types and pure logic: no I/O here, so it is easy to test and extend.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::style::Color;
 use ratatui::text::Text;
 use serde::Deserialize;
 use std::ops::Range;
@@ -33,13 +34,14 @@ pub enum Status {
 }
 
 impl Status {
-    pub fn icon(self) -> &'static str {
+    /// Nerd Font icon and its color: comment, check, hourglass, robot.
+    pub fn icon(self) -> (&'static str, Color) {
         match self {
-            Status::Waiting => "💬",
-            Status::Done => "✅",
-            Status::Background => "⏳",
-            Status::Working => "🤖",
-            Status::Unknown => "  ",
+            Status::Waiting => ("\u{f075}", Color::Yellow),
+            Status::Done => ("\u{f00c}", Color::Green),
+            Status::Background => ("\u{f252}", Color::Blue),
+            Status::Working => ("\u{f06a9}", Color::Magenta),
+            Status::Unknown => (" ", Color::Reset),
         }
     }
 }
@@ -325,7 +327,7 @@ mod tests {
         sort_agents(&mut agents);
         let ids: Vec<_> = agents.iter().map(|a| a.pane_id.as_str()).collect();
         assert_eq!(ids, ["%7", "%5", "%6", "%2", "%4", "%1", "%3"]);
-        assert_eq!(agents[1].status().icon(), "⏳");
+        assert_eq!(agents[1].status(), Status::Background);
     }
 
     #[test]
