@@ -281,10 +281,10 @@ fn run_external(action: &Action, a: &Agent) {
     let Some(workdir) = a.workdir.as_deref() else { return };
     match action {
         Action::Lazygit => {
-            let _ = Command::new("lazygit").args(["-p", workdir]).status();
+            let _ = in_env(workdir, "lazygit").args(["-p", workdir]).status();
         }
         Action::Nvim => {
-            let _ = Command::new("nvim").current_dir(workdir).status();
+            let _ = in_env(workdir, "nvim").status();
         }
         Action::Shell => {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
@@ -292,7 +292,7 @@ fn run_external(action: &Action, a: &Agent) {
         }
         Action::Pr => {
             // Open the branch's PR, or the create-PR page if there is none yet.
-            let open = |args: &[&str]| Command::new("gh").args(args).current_dir(workdir).status().is_ok_and(|s| s.success());
+            let open = |args: &[&str]| in_env(workdir, "gh").args(args).status().is_ok_and(|s| s.success());
             if !open(&["pr", "view", "--web"]) && !open(&["pr", "create", "--web"]) {
                 ask("gh could not open a PR, press enter to go back");
             }
@@ -315,6 +315,21 @@ fn run_external(action: &Action, a: &Agent) {
         }
         Action::Quit | Action::Jump | Action::New => {}
     }
+}
+
+/// `prog` in `workdir` with its direnv environment loaded, as a shell there would have it. Runs
+/// `prog` plain when there is no allowed .envrc, since `direnv exec` refuses a blocked one.
+fn in_env(workdir: &str, prog: &str) -> Command {
+    let status = Command::new("direnv").args(["status", "--json"]).current_dir(workdir).output().ok();
+    let allowed = status
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .is_some_and(|v| v["state"]["foundRC"]["allowed"] == 0);
+    let mut cmd = Command::new(if allowed { "direnv" } else { prog });
+    if allowed {
+        cmd.args(["exec", ".", prog]);
+    }
+    cmd.current_dir(workdir);
+    cmd
 }
 
 fn ask(prompt: &str) -> String {
