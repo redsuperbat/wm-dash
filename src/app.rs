@@ -21,6 +21,9 @@ pub struct Agent {
     /// Idle, but the Claude Code footer shows a background task (filled in after parsing).
     #[serde(skip)]
     pub background: bool,
+    /// The agent's latest `⏺` line: what it says it is doing (filled in after parsing).
+    #[serde(skip)]
+    pub activity: Option<String>,
 }
 
 /// Status in sort order: agents that need you come first.
@@ -82,6 +85,11 @@ pub fn clean_title(title: &str) -> &str {
 }
 
 /// True when one of the last 2 non-blank lines matches `· \d+ (monitor|shell)s?\b`.
+/// The last line Claude Code marks with `⏺`, its note on the current step or tool call.
+pub fn last_activity(capture: &str) -> Option<&str> {
+    capture.lines().rev().find_map(|l| l.trim_start().strip_prefix('⏺')).map(str::trim)
+}
+
 pub fn has_background_task(capture: &str) -> bool {
     let lines: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(2)..].iter().any(|l| {
@@ -277,7 +285,7 @@ impl App {
     /// List a just-split pane as a placeholder agent like `like`, and select it.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
-        let p = Agent { status: None, background: false, ..p };
+        let p = Agent { status: None, background: false, activity: None, ..p };
         self.pending = Some(p.clone());
         let agents = std::mem::take(&mut self.agents);
         self.set_agents(agents);
@@ -348,6 +356,13 @@ mod tests {
         assert!(!has_background_task("· shell"));
         assert!(!has_background_task("·1 shell"));
         assert!(!has_background_task(""));
+    }
+
+    #[test]
+    fn activity() {
+        let capture = "⏺ Now the MCP server tools.\n  Ran 2 shell commands\n⏺ Now the frontend.\n  Running…\n❯ \n";
+        assert_eq!(last_activity(capture), Some("Now the frontend."));
+        assert_eq!(last_activity("no marks\n"), None);
     }
 
     #[test]

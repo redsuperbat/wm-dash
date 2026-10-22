@@ -75,7 +75,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(text.join("\n")).block(block), r);
 }
 
-/// A header row per project, then 2 rows per agent: icon + title, then branch.
+/// A header row per project, then 3 rows per agent: icon + title, branch, latest activity.
 /// Each row is (text, style, agent index, icon color).
 type Row = (String, Style, Option<usize>, Option<Color>);
 
@@ -90,14 +90,16 @@ fn list_rows(app: &App) -> Vec<Row> {
         rows.push((format!(" {icon} {title}"), Style::new(), Some(n), Some(color)));
         let branch = a.branch.as_deref().unwrap_or(&a.worktree);
         rows.push((format!("   \u{e0a0} {branch}"), Style::new().dim(), Some(n), None));
+        let activity = a.activity.as_deref().unwrap_or_default();
+        rows.push((format!("     {activity}"), Style::new().dim().italic(), Some(n), None));
     }
     rows
 }
 
-/// First list row shown, scrolled so both of the selection's rows stay above the last row.
+/// First list row shown, scrolled so all of the selection's rows stay above the last row.
 fn list_offset(rows: &[Row], sel: usize, height: u16) -> usize {
     let sel_row = rows.iter().position(|r| r.2 == Some(sel)).unwrap_or(0);
-    (sel_row + 3).saturating_sub(height as usize)
+    (sel_row + 4).saturating_sub(height as usize)
 }
 
 /// The agent drawn at screen row `y` of the list, if any.
@@ -174,13 +176,14 @@ mod tests {
         // No branch from workmux: falls back to the worktree name.
         let other = crate::app::Agent {
             status: Some("done".into()),
+            activity: Some("Now the docs.".into()),
             project: Some("q".into()),
             worktree: "wt2".into(),
             title: Some("Docs".into()),
             ..Default::default()
         };
         let app = crate::app::App { agents: vec![agent, other], ..Default::default() };
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 7)).unwrap();
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 9)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
         let buf = term.backend().buffer();
         let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
@@ -188,16 +191,19 @@ mod tests {
         assert!(row(1).starts_with(" \u{f06a9} Fix login"), "{:?}", row(1));
         // Agent 0 is selected, so its icon is plain; agent 1's is colored.
         assert_eq!(buf[(1, 1)].fg, ratatui::style::Color::Reset);
-        assert_eq!(buf[(1, 4)].fg, ratatui::style::Color::Green);
+        assert_eq!(buf[(1, 5)].fg, ratatui::style::Color::Green);
         assert!(row(2).starts_with("   \u{e0a0} feat"), "{:?}", row(2));
-        // The next group's header follows right away, with no blank row.
-        assert!(row(3).starts_with(" q "), "{:?}", row(3));
-        assert!(row(5).starts_with("   \u{e0a0} wt2"), "{:?}", row(5));
+        // No activity yet: an empty row, so every agent takes the same height.
+        assert_eq!(row(3).trim(), "");
+        // The next group's header follows right away.
+        assert!(row(4).starts_with(" q "), "{:?}", row(4));
+        assert!(row(6).starts_with("   \u{e0a0} wt2"), "{:?}", row(6));
+        assert!(row(7).starts_with("     Now the docs."), "{:?}", row(7));
 
-        let area = ratatui::layout::Rect::new(0, 0, 20, 7);
+        let area = ratatui::layout::Rect::new(0, 0, 20, 9);
         assert_eq!(super::agent_at(&app, area, 0), None);
-        assert_eq!(super::agent_at(&app, area, 2), Some(0));
-        assert_eq!(super::agent_at(&app, area, 4), Some(1));
-        assert_eq!(super::agent_at(&app, area, 6), None);
+        assert_eq!(super::agent_at(&app, area, 3), Some(0));
+        assert_eq!(super::agent_at(&app, area, 7), Some(1));
+        assert_eq!(super::agent_at(&app, area, 8), None);
     }
 }

@@ -32,10 +32,10 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
         .context("parsing workmux status")?
         .agents;
     for a in &mut agents {
-        if a.status.as_deref() != Some("working") {
-            a.background = tmux(&["capture-pane", "-p", "-t", &a.pane_id])
-                .is_some_and(|c| app::has_background_task(&c));
-        }
+        // -J joins wrapped lines, so a long activity line comes through whole.
+        let capture = tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default();
+        a.background = a.status.as_deref() != Some("working") && app::has_background_task(&capture);
+        a.activity = app::last_activity(&capture).map(String::from);
     }
     app::sort_agents(&mut agents);
     Ok(agents)
