@@ -246,6 +246,8 @@ pub struct App {
     /// The key help popover is open.
     pub help: bool,
     pub preview: Option<Preview>,
+    /// A new agent's placeholder, listed until workmux lists its pane.
+    pub pending: Option<Agent>,
 }
 
 impl App {
@@ -254,12 +256,30 @@ impl App {
     }
 
     /// Replace the list; the selection follows the same pane_id, else stays at the same index.
-    pub fn set_agents(&mut self, agents: Vec<Agent>) {
+    pub fn set_agents(&mut self, mut agents: Vec<Agent>) {
+        if let Some(p) = &self.pending {
+            if agents.iter().any(|a| a.pane_id == p.pane_id) {
+                self.pending = None;
+            } else {
+                agents.push(p.clone());
+                sort_agents(&mut agents);
+            }
+        }
         let current = self.selected().map(|a| a.pane_id.clone());
         self.sel = current
             .and_then(|id| agents.iter().position(|a| a.pane_id == id))
             .unwrap_or_else(|| self.sel.min(agents.len().saturating_sub(1)));
         self.agents = agents;
+    }
+
+    /// List a just-split pane as a placeholder agent like `like`, and select it.
+    pub fn add_pending(&mut self, like: &Agent, pane: String) {
+        let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
+        let p = Agent { status: None, background: false, ..p };
+        self.pending = Some(p.clone());
+        let agents = std::mem::take(&mut self.agents);
+        self.set_agents(agents);
+        self.sel = self.agents.iter().position(|a| a.pane_id == p.pane_id).unwrap_or(self.sel);
     }
 
     pub fn move_sel(&mut self, down: bool) {
@@ -411,5 +431,19 @@ mod tests {
         assert_eq!(app.sel, 0);
         app.set_agents(vec![]);
         assert!(app.selected().is_none());
+    }
+
+    #[test]
+    fn selects_new_agent() {
+        let mut app = App::default();
+        app.set_agents(vec![agent("%1", "", "a", "1"), agent("%2", "", "a", "2")]);
+        app.add_pending(&app.agents[0].clone(), "%5".into());
+        assert_eq!(app.selected().unwrap().pane_id, "%5");
+        // Not listed by workmux yet: the placeholder stays, and stays selected.
+        app.set_agents(vec![agent("%1", "", "a", "1"), agent("%2", "", "a", "2")]);
+        assert_eq!(app.selected().unwrap().title.as_deref(), Some("starting…"));
+        app.set_agents(vec![agent("%1", "", "a", "1"), agent("%5", "working", "a", "1")]);
+        assert_eq!(app.selected().unwrap().status(), Status::Working);
+        assert!(app.pending.is_none());
     }
 }

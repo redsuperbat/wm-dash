@@ -33,6 +33,7 @@ enum Action {
     Jump,
     Lazygit,
     Nvim,
+    Shell,
     Pr,
     Remove,
     New,
@@ -107,7 +108,15 @@ fn run() -> Result<()> {
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
             dirty = true;
             match msg {
-                Msg::Agents(agents) => app.set_agents(agents),
+                Msg::Agents(agents) => {
+                    // Drop a new agent's placeholder if its pane closed before the agent started.
+                    if let Some(p) = &app.pending
+                        && tmux::tmux(&["list-panes", "-t", &p.pane_id]).is_none()
+                    {
+                        app.pending = None;
+                    }
+                    app.set_agents(agents)
+                }
                 Msg::Preview(p) => app.preview = Some(p),
                 Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => action = handle_key(&mut app, k),
                 Msg::Term(Event::Paste(text)) if app.insert => {
@@ -146,6 +155,28 @@ fn run() -> Result<()> {
             }
         }
 
+        let selected = app.selected().cloned();
+        match (action, selected) {
+            (Some(Action::Quit), _) => return Ok(()),
+            (Some(Action::Jump), Some(a)) => {
+                tmux::tmux(&["switch-client", "-t", &a.pane_id]);
+                return Ok(());
+            }
+            (Some(Action::New), Some(a)) => {
+                // Unfit first: the saved layout to restore would not have the new pane.
+                tmux::set_fitting(false);
+                if let Some(pane) = tmux::new_agent(&a) {
+                    app.add_pending(&a, pane);
+                }
+                tmux::set_fitting(true);
+                let _ = refresh_tx.send(());
+            }
+            (Some(action), Some(a)) => {
+                suspend(&mut terminal, &pause_tx, || run_external(&action, &a))?;
+                let _ = refresh_tx.send(());
+            }
+            _ => {}
+        }
         // Point the preview worker at the selected agent, sized to the preview box's inside.
         let size = terminal.size()?;
         let boxed = ui::preview_area(size.into());
@@ -159,26 +190,6 @@ fn run() -> Result<()> {
             req_tx.send(req.clone())?;
         }
 
-        let selected = app.selected().cloned();
-        match (action, selected) {
-            (Some(Action::Quit), _) => return Ok(()),
-            (Some(Action::Jump), Some(a)) => {
-                tmux::tmux(&["switch-client", "-t", &a.pane_id]);
-                return Ok(());
-            }
-            (Some(Action::New), Some(a)) => {
-                // Unfit first: the saved layout to restore would not have the new pane.
-                tmux::set_fitting(false);
-                tmux::new_agent(&a);
-                tmux::set_fitting(true);
-                let _ = refresh_tx.send(());
-            }
-            (Some(action), Some(a)) => {
-                suspend(&mut terminal, &pause_tx, || run_external(&action, &a))?;
-                let _ = refresh_tx.send(());
-            }
-            _ => {}
-        }
         if dirty {
             terminal.draw(|f| ui::draw(f, &app))?;
         }
@@ -214,6 +225,7 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         KeyCode::Enter => return Some(Action::Jump),
         KeyCode::Char('l') => return Some(Action::Lazygit),
         KeyCode::Char('v') => return Some(Action::Nvim),
+        KeyCode::Char('t') => return Some(Action::Shell),
         KeyCode::Char('g') => return Some(Action::Pr),
         KeyCode::Char('r') => return Some(Action::Remove),
         KeyCode::Char('n') => return Some(Action::New),
@@ -272,6 +284,10 @@ fn run_external(action: &Action, a: &Agent) {
         }
         Action::Nvim => {
             let _ = Command::new("nvim").current_dir(workdir).status();
+        }
+        Action::Shell => {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
+            let _ = Command::new(shell).current_dir(workdir).status();
         }
         Action::Pr => {
             // Open the branch's PR, or the create-PR page if there is none yet.

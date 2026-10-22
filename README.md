@@ -23,6 +23,7 @@ In the list:
 | `enter` | Jump to the agent's pane and quit |
 | `l` | Open lazygit in the agent's working directory |
 | `v` | Open nvim in the agent's working directory |
+| `t` | Open a shell in the agent's working directory; `exit` comes back |
 | `g` | Open the branch's GitHub PR in the browser, or the page to create one |
 | `r` | Remove the agent and its worktree (asks first) |
 | `n` | Start a new agent in a pane beside the selected one, in the same directory |

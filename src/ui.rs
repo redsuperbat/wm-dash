@@ -15,6 +15,7 @@ const KEYS: &[(&str, &str)] = &[
     ("enter", "jump to the agent's pane and quit"),
     ("l", "lazygit in the agent's workdir"),
     ("v", "nvim in the agent's workdir"),
+    ("t", "shell in the agent's workdir (exit to come back)"),
     ("g", "open the branch's PR on GitHub"),
     ("r", "remove the agent and its worktree"),
     ("n", "new agent in a pane beside this one"),
