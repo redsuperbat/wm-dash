@@ -3,6 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use std::time::{Duration, SystemTime};
 use unicode_width::UnicodeWidthChar;
 
 const HINTS: &str = " ? keys · q quit";
@@ -22,6 +23,15 @@ const KEYS: &[(&str, &str)] = &[
     ("?", "show this help"),
     ("q ctrl+c", "quit"),
 ];
+
+const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
+
+/// The spinner frame for now, from the clock so nothing has to keep count.
+fn spinner() -> char {
+    let ms = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
+    SPINNER[(ms / SPINNER_INTERVAL.as_millis()) as usize % SPINNER.len()]
+}
 
 /// Width of the agent list column.
 pub fn list_width(width: u16) -> u16 {
@@ -90,8 +100,10 @@ fn list_rows(app: &App) -> Vec<Row> {
         rows.push((format!(" {icon} {title}"), Style::new(), Some(n), Some(color)));
         let branch = a.branch.as_deref().unwrap_or(&a.worktree);
         rows.push((format!("   \u{e0a0} {branch}"), Style::new().dim(), Some(n), None));
-        let activity = a.activity.as_deref().unwrap_or_default();
-        rows.push((format!("     {activity}"), Style::new().dim().italic(), Some(n), None));
+        // Spins only while the agent works; otherwise a blank keeps the text lined up.
+        let icon = if a.status() == app::Status::Working { spinner() } else { ' ' };
+        let activity = a.activity.as_deref().map(|t| format!("   {icon} {t}")).unwrap_or_default();
+        rows.push((activity, Style::new().dim(), Some(n), None));
     }
     rows
 }
@@ -182,7 +194,7 @@ mod tests {
             title: Some("Docs".into()),
             ..Default::default()
         };
-        let app = crate::app::App { agents: vec![agent, other], ..Default::default() };
+        let app = crate::app::App { agents: vec![agent.clone(), other], ..Default::default() };
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 9)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
         let buf = term.backend().buffer();
@@ -198,12 +210,22 @@ mod tests {
         // The next group's header follows right away.
         assert!(row(4).starts_with(" q "), "{:?}", row(4));
         assert!(row(6).starts_with("   \u{e0a0} wt2"), "{:?}", row(6));
+        // Done, so no spinner.
         assert!(row(7).starts_with("     Now the docs."), "{:?}", row(7));
+        assert_eq!(buf[(5, 7)].modifier, buf[(5, 6)].modifier); // styled like the branch
 
         let area = ratatui::layout::Rect::new(0, 0, 20, 9);
         assert_eq!(super::agent_at(&app, area, 0), None);
         assert_eq!(super::agent_at(&app, area, 3), Some(0));
         assert_eq!(super::agent_at(&app, area, 7), Some(1));
         assert_eq!(super::agent_at(&app, area, 8), None);
+
+        // Working, so the activity row starts with a spinner frame.
+        let busy = crate::app::Agent { activity: Some("Running tests.".into()), ..agent };
+        let app = crate::app::App { agents: vec![busy], ..Default::default() };
+        let rows = super::list_rows(&app);
+        let frame = rows[3].0.chars().nth(3).unwrap();
+        assert!(super::SPINNER.contains(&frame), "{:?}", rows[3].0);
+        assert!(rows[3].0.ends_with(" Running tests."));
     }
 }

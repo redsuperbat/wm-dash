@@ -25,6 +25,8 @@ pub enum Msg {
     Term(Event),
     Agents(Vec<Agent>),
     Preview(Preview),
+    /// Time to step the spinner.
+    Tick,
 }
 
 /// What a key press asks the main loop to do besides updating state.
@@ -96,6 +98,12 @@ fn run() -> Result<()> {
         let tx = tx.clone();
         move || tmux::preview_worker(tx, req_rx)
     });
+    std::thread::spawn({
+        let tx = tx.clone();
+        move || while tx.send(Msg::Tick).is_ok() {
+            std::thread::sleep(ui::SPINNER_INTERVAL);
+        }
+    });
     std::thread::spawn(move || input_worker(tx, pause_rx));
 
     let mut app = App::default();
@@ -106,7 +114,8 @@ fn run() -> Result<()> {
         let mut action = None;
         // Block for the next message, then take whatever else is queued before drawing once.
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
-            dirty = true;
+            // A tick only needs a redraw while some agent's spinner is showing.
+            dirty |= !matches!(msg, Msg::Tick) || app.agents.iter().any(|a| a.status() == app::Status::Working);
             match msg {
                 Msg::Agents(agents) => {
                     // Drop a new agent's placeholder if its pane closed before the agent started.
@@ -118,6 +127,7 @@ fn run() -> Result<()> {
                     app.set_agents(agents)
                 }
                 Msg::Preview(p) => app.preview = Some(p),
+                Msg::Tick => {}
                 Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => action = handle_key(&mut app, k),
                 Msg::Term(Event::Paste(text)) if app.insert => {
                     if let Some(a) = app.selected() {
