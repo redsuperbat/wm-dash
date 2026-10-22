@@ -120,7 +120,9 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
         };
         let row = Rect { y: area.y + r as u16, height: 1, ..area };
         f.render_widget(Paragraph::new(shorten(&text, area.width as usize)).style(style), row);
-        if let Some((_, _, _, Some(color))) = rows.get(off + r)
+        // Not on the selected row: reversed, the color would fill the icon's cell instead.
+        if let Some((_, _, n, Some(color))) = rows.get(off + r)
+            && *n != Some(app.sel)
             && area.width > 1
         {
             f.buffer_mut()[(area.x + 1, row.y)].set_fg(*color);
@@ -171,6 +173,7 @@ mod tests {
         };
         // No branch from workmux: falls back to the worktree name.
         let other = crate::app::Agent {
+            status: Some("done".into()),
             project: Some("q".into()),
             worktree: "wt2".into(),
             title: Some("Docs".into()),
@@ -183,7 +186,9 @@ mod tests {
         let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
         assert!(row(0).starts_with(" p "), "{:?}", row(0));
         assert!(row(1).starts_with(" \u{f06a9} Fix login"), "{:?}", row(1));
-        assert_eq!(buf[(1, 1)].fg, ratatui::style::Color::Magenta);
+        // Agent 0 is selected, so its icon is plain; agent 1's is colored.
+        assert_eq!(buf[(1, 1)].fg, ratatui::style::Color::Reset);
+        assert_eq!(buf[(1, 4)].fg, ratatui::style::Color::Green);
         assert!(row(2).starts_with("   \u{e0a0} feat"), "{:?}", row(2));
         // The next group's header follows right away, with no blank row.
         assert!(row(3).starts_with(" q "), "{:?}", row(3));
