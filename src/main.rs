@@ -213,14 +213,15 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
     }
     match k.code {
         KeyCode::Char('c') if ctrl => return Some(Action::Quit),
+        // Page through the agent's own pane, which scrolls the preview.
+        KeyCode::Char(c @ ('u' | 'd')) if ctrl => {
+            if let Some(a) = app.selected() {
+                tmux::send_key(&a.pane_id, if c == 'u' { "PPage" } else { "NPage" });
+            }
+        }
         _ if ctrl => {}
         KeyCode::Char('j') | KeyCode::Down => app.move_sel(true),
         KeyCode::Char('k') | KeyCode::Up => app.move_sel(false),
-        KeyCode::PageUp | KeyCode::PageDown => {
-            if let (Some(a), Some(key)) = (app.selected(), app::tmux_key(k)) {
-                tmux::send_key(&a.pane_id, &key);
-            }
-        }
         KeyCode::Char('i') => app.insert = app.selected().is_some(),
         KeyCode::Enter => return Some(Action::Jump),
         KeyCode::Char('l') => return Some(Action::Lazygit),

@@ -17,7 +17,7 @@ In the list:
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows, click | Move the selection |
-| `PgUp` / `PgDn`, mouse wheel | Scroll the preview (scrolls the agent's own pane) |
+| `ctrl+u` / `ctrl+d`, mouse wheel | Scroll the preview (scrolls the agent's own pane) |
 | Mouse over the preview | Select text and click, as in the agent's pane |
 | `i` | Insert mode: keys go to the agent |
 | `enter` | Jump to the agent's pane and quit |
