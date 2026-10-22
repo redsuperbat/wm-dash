@@ -171,6 +171,12 @@ pub fn strip_osc(line: &str) -> String {
     out
 }
 
+/// The top-level `agent:` command in a workmux config file.
+pub fn agent_cmd(config: &str) -> Option<&str> {
+    let cmd = config.lines().find_map(|l| l.strip_prefix("agent:"))?.trim();
+    Some(cmd.trim_matches(['"', '\'']).trim()).filter(|c| !c.is_empty())
+}
+
 /// Rows of the pane to show: ending at the last non-blank line or the cursor line, whichever is
 /// lower, and at most `height` rows.
 pub fn crop(lines: &[&str], cursor_y: usize, height: usize) -> Range<usize> {
@@ -370,6 +376,14 @@ mod tests {
         assert_eq!(seq(MouseEventKind::Up(MouseButton::Left), none).unwrap(), "\x1b[<0;10;5m");
         assert_eq!(seq(MouseEventKind::Down(MouseButton::Right), KeyModifiers::SHIFT).unwrap(), "\x1b[<6;10;5M");
         assert_eq!(seq(MouseEventKind::Moved, none), None);
+    }
+
+    #[test]
+    fn agent_cmd() {
+        let config = "nerdfont: true\nagent: claude --permission-mode auto\npanes:\n  - command: <agent>\n";
+        assert_eq!(super::agent_cmd(config), Some("claude --permission-mode auto"));
+        assert_eq!(super::agent_cmd("agent: \"codex\"\n"), Some("codex"));
+        assert_eq!(super::agent_cmd("panes: []\n"), None);
     }
 
     #[test]

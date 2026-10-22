@@ -25,6 +25,7 @@ In the list:
 | `v` | Open nvim in the agent's working directory |
 | `g` | Open the branch's GitHub PR in the browser, or the page to create one |
 | `r` | Remove the agent and its worktree (asks first) |
+| `n` | Start a new agent in a pane beside the selected one, in the same directory |
 | `?` | Show all keys |
 | `q`, `ctrl+c` | Quit |
 

@@ -180,6 +180,23 @@ pub fn set_fitting(on: bool) {
     f.disabled = !on;
 }
 
+/// Split the agent's pane and start another agent beside it in the same directory. The command
+/// is typed into a fresh shell, as workmux does, so the shell and direnv set things up first.
+pub fn new_agent(a: &Agent) {
+    let read = |path: &str| std::fs::read_to_string(path.trim()).ok();
+    let project = a.project_path.as_deref().and_then(|p| read(&format!("{p}/.workmux.yaml")));
+    let global = Command::new("workmux").args(["config", "path"]).output().ok();
+    let global = global.and_then(|o| read(&String::from_utf8_lossy(&o.stdout)));
+    let configs = [project, global];
+    let cmd = configs.iter().flatten().find_map(|c| app::agent_cmd(c));
+    let dir = a.workdir.as_deref().unwrap_or("#{pane_current_path}");
+    let split = ["split-window", "-dh", "-t", &a.pane_id, "-c", dir, "-P", "-F", "#{pane_id}"];
+    if let Some(pane) = tmux(&split) {
+        let pane = pane.trim();
+        tmux(&["send-keys", "-t", pane, "-l", cmd.unwrap_or("claude"), ";", "send-keys", "-t", pane, "Enter"]);
+    }
+}
+
 pub fn send_key(pane: &str, key: &str) {
     tmux(&["send-keys", "-t", pane, key]);
 }

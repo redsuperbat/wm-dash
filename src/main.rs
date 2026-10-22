@@ -35,6 +35,7 @@ enum Action {
     Nvim,
     Pr,
     Remove,
+    New,
 }
 
 fn tui_on() -> Result<()> {
@@ -165,6 +166,13 @@ fn run() -> Result<()> {
                 tmux::tmux(&["switch-client", "-t", &a.pane_id]);
                 return Ok(());
             }
+            (Some(Action::New), Some(a)) => {
+                // Unfit first: the saved layout to restore would not have the new pane.
+                tmux::set_fitting(false);
+                tmux::new_agent(&a);
+                tmux::set_fitting(true);
+                let _ = refresh_tx.send(());
+            }
             (Some(action), Some(a)) => {
                 suspend(&mut terminal, &pause_tx, || run_external(&action, &a))?;
                 let _ = refresh_tx.send(());
@@ -208,6 +216,7 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         KeyCode::Char('v') => return Some(Action::Nvim),
         KeyCode::Char('g') => return Some(Action::Pr),
         KeyCode::Char('r') => return Some(Action::Remove),
+        KeyCode::Char('n') => return Some(Action::New),
         KeyCode::Char('?') => app.help = true,
         KeyCode::Char('q') => return Some(Action::Quit),
         _ => {}
@@ -287,7 +296,7 @@ fn run_external(action: &Action, a: &Agent) {
                 ask("workmux remove failed, press enter to go back");
             }
         }
-        Action::Quit | Action::Jump => {}
+        Action::Quit | Action::Jump | Action::New => {}
     }
 }
 

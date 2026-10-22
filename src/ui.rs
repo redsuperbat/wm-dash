@@ -17,6 +17,7 @@ const KEYS: &[(&str, &str)] = &[
     ("v", "nvim in the agent's workdir"),
     ("g", "open the branch's PR on GitHub"),
     ("r", "remove the agent and its worktree"),
+    ("n", "new agent in a pane beside this one"),
     ("?", "show this help"),
     ("q ctrl+c", "quit"),
 ];
