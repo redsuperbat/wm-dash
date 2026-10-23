@@ -216,10 +216,10 @@ pub fn set_fitting(on: bool) {
     f.disabled = !on;
 }
 
-/// Split the agent's pane and start another agent beside it in the same directory, or for an
-/// empty session, in a new window there. The command is typed into a fresh shell, as workmux
-/// does, so the shell and direnv set things up first. `; exit` closes the pane when the agent
-/// quits. Returns the new pane.
+/// Start another agent in a new window right after the agent's own, in the same directory. A
+/// window rather than a split, so previewing one agent never squeezes another. The command is
+/// typed into a fresh shell, as workmux does, so the shell and direnv set things up first.
+/// `; exit` closes the window when the agent quits. Returns the new pane.
 pub fn new_agent(a: &Agent) -> Option<String> {
     let read = |path: &str| std::fs::read_to_string(path.trim()).ok();
     let project = a.project_path.as_deref().and_then(|p| read(&format!("{p}/.workmux.yaml")));
@@ -228,13 +228,10 @@ pub fn new_agent(a: &Agent) -> Option<String> {
     let configs = [project, global];
     let cmd = configs.iter().flatten().find_map(|c| app::agent_cmd(c));
     let dir = a.workdir.as_deref().unwrap_or("#{pane_current_path}");
-    let session = format!("={}:", a.session.as_deref().unwrap_or_default());
-    let pane = if a.session_only {
-        tmux(&["new-window", "-d", "-t", &session, "-c", dir, "-P", "-F", "#{pane_id}"])
-    } else {
-        tmux(&["split-window", "-dh", "-t", &a.pane_id, "-c", dir, "-P", "-F", "#{pane_id}"])
-    };
-    let pane = pane?.trim().to_string();
+    // new-window wants a window, not a pane.
+    let window = tmux(&["display", "-p", "-t", &a.pane_id, "#{window_id}"])?;
+    let new = ["new-window", "-ad", "-t", window.trim(), "-c", dir, "-P", "-F", "#{pane_id}"];
+    let pane = tmux(&new)?.trim().to_string();
     let cmd = format!("{}; exit", cmd.unwrap_or("claude"));
     tmux(&["send-keys", "-t", &pane, "-l", &cmd, ";", "send-keys", "-t", &pane, "Enter"]);
     Some(pane)

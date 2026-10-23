@@ -179,12 +179,9 @@ fn run() -> Result<()> {
                 return Ok(());
             }
             (Some(Action::New), Some(a)) => {
-                // Unfit first: the saved layout to restore would not have the new pane.
-                tmux::set_fitting(false);
                 if let Some(pane) = tmux::new_agent(&a) {
                     app.add_pending(&a, pane);
                 }
-                tmux::set_fitting(true);
                 let _ = refresh_tx.send(());
             }
             // An empty session has no agent to remove; its pane is yours.

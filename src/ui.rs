@@ -19,7 +19,7 @@ const KEYS: &[(&str, &str)] = &[
     ("t", "shell in the agent's workdir (exit to come back)"),
     ("g", "open the branch's PR on GitHub"),
     ("r", "remove the agent and its worktree"),
-    ("n", "new agent beside this one (empty session: new window)"),
+    ("n", "new agent in a new window of this session"),
     ("?", "show this help"),
     ("q ctrl+c", "quit"),
 ];

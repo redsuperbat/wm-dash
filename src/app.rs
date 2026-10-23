@@ -18,7 +18,6 @@ pub struct Agent {
     pub title: Option<String>,
     pub project_path: Option<String>,
     pub workdir: Option<String>,
-    pub session: Option<String>,
     /// Not an agent: an empty session, listed by its active pane so you can start an agent there.
     #[serde(skip)]
     pub session_only: bool,
@@ -130,7 +129,6 @@ pub fn group_by_session(
                 worktree: s.name.clone(),
                 project_path: Some(s.path.clone()),
                 workdir: Some(s.path.clone()),
-                session: Some(s.name.clone()),
                 session_only: true,
                 ..Default::default()
             });
