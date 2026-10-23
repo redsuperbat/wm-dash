@@ -28,9 +28,7 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
         .stderr(Stdio::null())
         .output()
         .context("running workmux")?;
-    let mut agents = serde_json::from_slice::<Status>(&out.stdout)
-        .context("parsing workmux status")?
-        .agents;
+    let mut agents = serde_json::from_slice::<Status>(&out.stdout).context("parsing workmux status")?.agents;
     for a in &mut agents {
         // -J joins wrapped lines, so a long activity line comes through whole.
         let capture = tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default();
@@ -44,7 +42,9 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
 /// Refresh the agent list every 2s, or right away when `refresh` gets a message.
 pub fn list_worker(tx: Sender<crate::Msg>, refresh: Receiver<()>) {
     loop {
-        if let Ok(agents) = fetch_agents() && tx.send(crate::Msg::Agents(agents)).is_err() {
+        if let Ok(agents) = fetch_agents()
+            && tx.send(crate::Msg::Agents(agents)).is_err()
+        {
             return;
         }
         match refresh.recv_timeout(LIST_INTERVAL) {

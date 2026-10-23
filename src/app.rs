@@ -99,10 +99,9 @@ pub fn has_background_task(capture: &str) -> bool {
             let Some(rest) = rest[digits..].strip_prefix(' ').filter(|_| digits > 0) else {
                 return false;
             };
-            ["monitor", "shell"].iter().any(|w| {
-                rest.strip_prefix(w)
-                    .is_some_and(|r| !starts_with_word(r.strip_prefix('s').unwrap_or(r)))
-            })
+            ["monitor", "shell"]
+                .iter()
+                .any(|w| rest.strip_prefix(w).is_some_and(|r| !starts_with_word(r.strip_prefix('s').unwrap_or(r))))
         })
     })
 }

@@ -22,6 +22,8 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [ cargo rustc clippy rustfmt rust-analyzer ];
+          # Lets rust-analyzer find the standard library's source.
+          RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };
       });
     };

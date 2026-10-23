@@ -58,8 +58,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let inner = block.inner(boxed);
     f.render_widget(block, boxed);
 
-    let Some(p) = app.preview.as_ref().filter(|p| Some(&p.pane) == app.selected().map(|a| &a.pane_id))
-    else {
+    let Some(p) = app.preview.as_ref().filter(|p| Some(&p.pane) == app.selected().map(|a| &a.pane_id)) else {
         return;
     };
     f.render_widget(Paragraph::new(p.text.clone()), inner);
@@ -127,7 +126,9 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let off = list_offset(&rows, app.sel, area.height);
     for r in 0..h {
         let (text, style) = match rows.get(off + r) {
-            Some((_, _, Some(n), _)) if *n == app.sel => (rows[off + r].0.clone(), Style::new().add_modifier(Modifier::REVERSED)),
+            Some((_, _, Some(n), _)) if *n == app.sel => {
+                (rows[off + r].0.clone(), Style::new().add_modifier(Modifier::REVERSED))
+            }
             Some((text, style, _, _)) => (text.clone(), *style),
             None if r == h - 1 => (HINTS.into(), Style::new().dim()),
             None => continue,

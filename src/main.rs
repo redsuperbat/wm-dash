@@ -7,8 +7,8 @@ mod ui;
 use anyhow::Result;
 use app::{Agent, App, Preview};
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode,
+    KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
@@ -49,7 +49,8 @@ fn tui_on() -> Result<()> {
 
 fn tui_off() {
     let _ = disable_raw_mode();
-    let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture, crossterm::cursor::Show, LeaveAlternateScreen);
+    let _ =
+        execute!(stdout(), DisableBracketedPaste, DisableMouseCapture, crossterm::cursor::Show, LeaveAlternateScreen);
 }
 
 /// Undo the fit and give the terminal back. Safe to call more than once.
@@ -100,8 +101,10 @@ fn run() -> Result<()> {
     });
     std::thread::spawn({
         let tx = tx.clone();
-        move || while tx.send(Msg::Tick).is_ok() {
-            std::thread::sleep(ui::SPINNER_INTERVAL);
+        move || {
+            while tx.send(Msg::Tick).is_ok() {
+                std::thread::sleep(ui::SPINNER_INTERVAL);
+            }
         }
     });
     std::thread::spawn(move || input_worker(tx, pause_rx));
