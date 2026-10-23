@@ -35,6 +35,9 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
     for a in &mut agents {
         // -J joins wrapped lines, so a long activity line comes through whole.
         let capture = tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default();
+        if a.status.as_deref() == Some("working") && app::is_interrupted(&capture) {
+            a.status = Some("interrupted".into());
+        }
         a.background = a.status.as_deref() != Some("working") && app::has_background_task(&capture);
         a.activity = app::last_activity(&capture).map(String::from);
     }

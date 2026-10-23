@@ -4,7 +4,7 @@ A full-screen dashboard for [workmux](https://github.com/raine/workmux) agents: 
 
 Agents are grouped by tmux session, one session per repo: when several sessions are on the same repo, only the oldest is listed. Sessions without agents are listed too; select one and press `n` to start an agent there.
 
-Agents that need you come first: waiting, done, idle with a background task, then working.
+Agents that need you come first: waiting, interrupted, done, idle with a background task, then working.
 
 Run it in a tmux popup:
 

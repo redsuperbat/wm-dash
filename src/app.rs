@@ -36,6 +36,7 @@ pub struct Agent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     Waiting,
+    Interrupted,
     Done,
     Background,
     Working,
@@ -43,10 +44,11 @@ pub enum Status {
 }
 
 impl Status {
-    /// Nerd Font icon and its color: comment, check, hourglass, robot.
+    /// Nerd Font icon and its color: comment, ban, check, hourglass, robot.
     pub fn icon(self) -> (&'static str, Color) {
         match self {
             Status::Waiting => ("\u{f075}", Color::Yellow),
+            Status::Interrupted => ("\u{f05e}", Color::Red),
             Status::Done => ("\u{f00c}", Color::Green),
             Status::Background => ("\u{f252}", Color::Blue),
             Status::Working => ("\u{f06a9}", Color::Magenta),
@@ -61,6 +63,7 @@ impl Agent {
             Some("working") => Status::Working,
             _ if self.background => Status::Background,
             Some("waiting") => Status::Waiting,
+            Some("interrupted") => Status::Interrupted,
             Some("done") => Status::Done,
             _ => Status::Unknown,
         }
@@ -147,6 +150,16 @@ pub fn clean_title(title: &str) -> &str {
 /// The last line Claude Code marks with `⏺`, its note on the current step or tool call.
 pub fn last_activity(capture: &str) -> Option<&str> {
     capture.lines().rev().find_map(|l| l.trim_start().strip_prefix('⏺')).map(str::trim)
+}
+
+/// Claude Code's "⎿  Interrupted" note sits right above the input box: the user stopped it with
+/// esc, which fires no hook, so workmux still says working.
+pub fn is_interrupted(capture: &str) -> bool {
+    let lines: Vec<&str> = capture.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].starts_with('─')).collect();
+    // The box is the last two rules; the line above the top one is the latest output.
+    let Some(&top) = rules.len().checked_sub(2).map(|i| &rules[i]) else { return false };
+    top > 0 && lines[top - 1].strip_prefix('⎿').is_some_and(|l| l.trim_start().starts_with("Interrupted"))
 }
 
 pub fn has_background_task(capture: &str) -> bool {
@@ -411,6 +424,18 @@ mod tests {
         assert_eq!(clean_title("⠂ 2 tasks"), "2 tasks");
         assert_eq!(clean_title("Ölfass"), "Ölfass");
         assert_eq!(clean_title("✳ "), "");
+    }
+
+    #[test]
+    fn interrupted() {
+        let footer = "────\n❯ \n────\n  Opus on main\n  ⏵⏵ bypass permissions on\n";
+        assert!(is_interrupted(&format!(
+            "❯ do it\n  Ran 1 shell command\n  ⎿\u{a0} Interrupted · What should Claude do instead?\n\n{footer}"
+        )));
+        // A new prompt after the interrupt: working again.
+        assert!(!is_interrupted(&format!("  ⎿  Interrupted · What should Claude do instead?\n❯ try again\n{footer}")));
+        assert!(!is_interrupted(&format!("⏺ Done.\n{footer}")));
+        assert!(!is_interrupted("⎿  Interrupted\n"));
     }
 
     #[test]
