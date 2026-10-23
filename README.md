@@ -19,8 +19,7 @@ In the list:
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows, click | Move the selection |
-| `ctrl+u` / `ctrl+d` | Scroll the preview a page (scrolls the agent's own pane) |
-| `ctrl+k` / `ctrl+j`, mouse wheel | Scroll the preview a few lines |
+| `ctrl+u` / `ctrl+d`, mouse wheel | Scroll the preview (scrolls the agent's own pane) |
 | Mouse over the preview | Select text and click, as in the agent's pane |
 | `i` | Insert mode: keys go to the agent |
 | `enter` | Jump to the agent's pane and quit |
