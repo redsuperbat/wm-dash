@@ -40,7 +40,13 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
     let paths = sessions.iter().map(|s| s.path.as_str());
     let paths = paths.chain(agents.iter().filter_map(|a| a.project_path.as_deref().or(a.workdir.as_deref())));
     let repos: HashMap<String, String> = paths.filter_map(|p| Some((p.to_string(), repo(p)?))).collect();
-    Ok(app::group_by_session(agents, &sessions, &repos))
+    let mut agents = app::group_by_session(agents, &sessions, &repos);
+    let commands = tmux(&["list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}"]).unwrap_or_default();
+    let commands: HashMap<&str, &str> = commands.lines().filter_map(|l| l.split_once(' ')).collect();
+    for a in &mut agents {
+        a.exited = commands.get(a.pane_id.as_str()).is_some_and(|c| app::is_shell(c));
+    }
+    Ok(agents)
 }
 
 /// Every tmux session, oldest first.

@@ -22,6 +22,9 @@ pub struct Agent {
     /// Not an agent: an empty session, listed by its active pane so you can start an agent there.
     #[serde(skip)]
     pub session_only: bool,
+    /// The pane runs a plain shell: the agent in it has exited (filled in after parsing).
+    #[serde(skip)]
+    pub exited: bool,
     /// Idle, but the Claude Code footer shows a background task (filled in after parsing).
     #[serde(skip)]
     pub background: bool,
@@ -81,6 +84,11 @@ impl Agent {
 /// Grouped by project, then by status inside each project.
 pub fn sort_agents(agents: &mut [Agent]) {
     agents.sort_by_cached_key(|a| (a.project.clone(), a.status(), a.worktree.clone()));
+}
+
+/// A pane running this command is back at its shell prompt.
+pub fn is_shell(command: &str) -> bool {
+    ["fish", "bash", "zsh", "sh", "dash", "ksh", "nu"].contains(&command.trim_start_matches('-'))
 }
 
 /// A tmux session: its name, folder and active pane.
@@ -327,17 +335,26 @@ impl App {
                 sort_agents(&mut agents);
             }
         }
-        let current = self.selected().map(|a| a.pane_id.clone());
+        let before = self.selected().map(|a| (a.pane_id.clone(), a.exited));
+        let current = before.as_ref().map(|(id, _)| id);
         self.sel = current
-            .and_then(|id| agents.iter().position(|a| a.pane_id == id))
+            .and_then(|id| agents.iter().position(|a| &a.pane_id == id))
             .unwrap_or_else(|| self.sel.min(agents.len().saturating_sub(1)));
         self.agents = agents;
+        // Leave insert mode when the agent we type into is gone or has just exited, so keys never
+        // land in another agent or the shell left behind.
+        let gone = |(id, was_exited): (String, bool)| {
+            self.selected().is_none_or(|a| a.pane_id != id || (a.exited && !was_exited))
+        };
+        if self.insert && before.is_none_or(gone) {
+            self.insert = false;
+        }
     }
 
     /// List a just-split pane as a placeholder agent like `like`, and select it.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
-        let p = Agent { status: None, background: false, activity: None, session_only: false, ..p };
+        let p = Agent { status: None, background: false, activity: None, session_only: false, exited: false, ..p };
         self.pending = Some(p.clone());
         let agents = std::mem::take(&mut self.agents);
         self.set_agents(agents);
@@ -500,6 +517,25 @@ mod tests {
         assert_eq!(app.sel, 0);
         app.set_agents(vec![]);
         assert!(app.selected().is_none());
+    }
+
+    #[test]
+    fn insert_ends_with_agent() {
+        let exited = |pane| Agent { exited: true, ..agent(pane, "", "a", pane) };
+        let mut app = App::default();
+        app.set_agents(vec![agent("%1", "working", "a", "1"), agent("%2", "", "a", "2")]);
+        app.insert = true;
+        app.set_agents(vec![agent("%1", "working", "a", "1"), agent("%2", "", "a", "2")]);
+        assert!(app.insert, "still running: stay");
+        app.set_agents(vec![exited("%1"), agent("%2", "", "a", "2")]);
+        assert!(!app.insert, "agent exited, pane left as a shell");
+
+        app.insert = true; // typing into the shell on purpose is fine
+        app.set_agents(vec![exited("%1"), agent("%2", "", "a", "2")]);
+        assert!(app.insert);
+        app.set_agents(vec![agent("%2", "", "a", "2")]);
+        assert!(!app.insert, "pane closed: never type into the agent selected next");
+        assert!(is_shell("fish") && is_shell("-zsh") && !is_shell(".claude-unwrapp"));
     }
 
     #[test]
