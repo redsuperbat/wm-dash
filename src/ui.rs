@@ -19,7 +19,7 @@ const KEYS: &[(&str, &str)] = &[
     ("t", "shell in the agent's workdir (exit to come back)"),
     ("g", "open the branch's PR on GitHub"),
     ("r", "remove the agent and its worktree"),
-    ("n", "new agent in a pane beside this one"),
+    ("n", "new agent beside this one (empty session: new window)"),
     ("?", "show this help"),
     ("q ctrl+c", "quit"),
 ];
@@ -91,6 +91,11 @@ type Row = (String, Style, Option<usize>, Option<Color>);
 fn list_rows(app: &App) -> Vec<Row> {
     let mut rows = Vec::new();
     for (n, a) in app.agents.iter().enumerate() {
+        // An empty session is just its header, and selectable.
+        if a.session_only {
+            rows.push((format!(" {}", a.worktree), Style::new().bold(), Some(n), None));
+            continue;
+        }
         if n == 0 || app.agents[n - 1].project != a.project {
             rows.push((format!(" {}", a.project.as_deref().unwrap_or("other")), Style::new().bold(), None, None));
         }
@@ -228,5 +233,12 @@ mod tests {
         let frame = rows[3].0.chars().nth(3).unwrap();
         assert!(super::SPINNER.contains(&frame), "{:?}", rows[3].0);
         assert!(rows[3].0.ends_with(" Running tests."));
+
+        // An empty session: one header row that belongs to its entry, so it can be selected.
+        let empty = crate::app::Agent { worktree: "dots".into(), session_only: true, ..Default::default() };
+        let app = crate::app::App { agents: vec![empty], ..Default::default() };
+        let rows = super::list_rows(&app);
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].0.as_str(), rows[0].2), (" dots", Some(0)));
     }
 }

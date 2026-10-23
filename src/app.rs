@@ -18,6 +18,10 @@ pub struct Agent {
     pub title: Option<String>,
     pub project_path: Option<String>,
     pub workdir: Option<String>,
+    pub session: Option<String>,
+    /// Not an agent: an empty session, listed by its active pane so you can start an agent there.
+    #[serde(skip)]
+    pub session_only: bool,
     /// Idle, but the Claude Code footer shows a background task (filled in after parsing).
     #[serde(skip)]
     pub background: bool,
@@ -77,6 +81,55 @@ impl Agent {
 /// Grouped by project, then by status inside each project.
 pub fn sort_agents(agents: &mut [Agent]) {
     agents.sort_by_cached_key(|a| (a.project.clone(), a.status(), a.worktree.clone()));
+}
+
+/// A tmux session: its name, folder and active pane.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub name: String,
+    pub path: String,
+    pub pane: String,
+}
+
+/// Group agents by tmux session, one session per repo: of sessions on the same repo (`repos` maps
+/// a folder to its repo) only the first in `sessions` is shown, and agents of the others join it.
+/// Sessions without agents are listed too, as `session_only` entries.
+pub fn group_by_session(
+    mut agents: Vec<Agent>,
+    sessions: &[Session],
+    repos: &std::collections::HashMap<String, String>,
+) -> Vec<Agent> {
+    let repo = |path: &str| repos.get(path).map_or(path, String::as_str).to_string();
+    let mut shown: Vec<(String, &Session)> = Vec::new();
+    for s in sessions {
+        let r = repo(&s.path);
+        if !shown.iter().any(|(seen, _)| *seen == r) {
+            shown.push((r, s));
+        }
+    }
+    for a in &mut agents {
+        let Some(path) = a.project_path.as_deref().or(a.workdir.as_deref()) else { continue };
+        let r = repo(path);
+        if let Some((_, s)) = shown.iter().find(|(seen, _)| *seen == r) {
+            a.project = Some(s.name.clone());
+        }
+    }
+    for (_, s) in &shown {
+        if !agents.iter().any(|a| a.project.as_deref() == Some(&s.name)) {
+            agents.push(Agent {
+                pane_id: s.pane.clone(),
+                project: Some(s.name.clone()),
+                worktree: s.name.clone(),
+                project_path: Some(s.path.clone()),
+                workdir: Some(s.path.clone()),
+                session: Some(s.name.clone()),
+                session_only: true,
+                ..Default::default()
+            });
+        }
+    }
+    sort_agents(&mut agents);
+    agents
 }
 
 /// Claude Code prefixes titles with ✳ or a spinner char; drop leading non-letter/non-digit symbols.
@@ -284,7 +337,7 @@ impl App {
     /// List a just-split pane as a placeholder agent like `like`, and select it.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
-        let p = Agent { status: None, background: false, activity: None, ..p };
+        let p = Agent { status: None, background: false, activity: None, session_only: false, ..p };
         self.pending = Some(p.clone());
         let agents = std::mem::take(&mut self.agents);
         self.set_agents(agents);
@@ -447,6 +500,36 @@ mod tests {
         assert_eq!(app.sel, 0);
         app.set_agents(vec![]);
         assert!(app.selected().is_none());
+    }
+
+    #[test]
+    fn groups_by_session() {
+        let session =
+            |name: &str, path: &str, pane: &str| Session { name: name.into(), path: path.into(), pane: pane.into() };
+        // "web" and "web2" are on the same repo; "web" comes first, so only it is shown.
+        let sessions =
+            [session("web", "/w/web", "%1"), session("web2", "/w/web-copy", "%2"), session("dots", "/c/dots", "%3")];
+        let repos: std::collections::HashMap<String, String> = [
+            ("/w/web", "/w/web/.git"),
+            ("/w/web-copy", "/w/web/.git"),
+            ("/w/web-wt", "/w/web/.git"), // a worktree of web
+            ("/c/dots", "/c/dots/.git"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+        let mut wt = agent("%9", "working", "web", "wt");
+        wt.project_path = Some("/w/web-wt".into());
+        let mut other = agent("%8", "done", "web-copy", "x");
+        other.project_path = Some("/w/web-copy".into());
+
+        let list = group_by_session(vec![wt, other], &sessions, &repos);
+        let rows: Vec<_> = list.iter().map(|a| (a.pane_id.as_str(), a.project.as_deref(), a.session_only)).collect();
+        assert_eq!(
+            rows,
+            [("%3", Some("dots"), true), ("%8", Some("web"), false), ("%9", Some("web"), false)],
+            "web2 hidden, its agent under web; empty dots listed by its active pane"
+        );
     }
 
     #[test]

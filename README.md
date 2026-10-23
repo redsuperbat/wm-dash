@@ -2,7 +2,9 @@
 
 A full-screen dashboard for [workmux](https://github.com/raine/workmux) agents: the agent list on the left and a live preview of the selected agent's tmux pane on the right.
 
-Agents that need you come first: 💬 waiting, ✅ done, ⏳ idle with a background task, 🤖 working.
+Agents are grouped by tmux session, one session per repo: when several sessions are on the same repo, only the oldest is listed. Sessions without agents are listed too; select one and press `n` to start an agent there.
+
+Agents that need you come first: waiting, done, idle with a background task, then working.
 
 Run it in a tmux popup:
 
@@ -26,7 +28,7 @@ In the list:
 | `t` | Open a shell in the agent's working directory; `exit` comes back |
 | `g` | Open the branch's GitHub PR in the browser, or the page to create one |
 | `r` | Remove the agent and its worktree (asks first) |
-| `n` | Start a new agent in a pane beside the selected one, in the same directory |
+| `n` | Start a new agent in a pane beside the selected one, in the same directory; on an empty session, in a new window there |
 | `?` | Show all keys |
 | `q`, `ctrl+c` | Quit |
 

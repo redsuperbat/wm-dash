@@ -187,6 +187,8 @@ fn run() -> Result<()> {
                 tmux::set_fitting(true);
                 let _ = refresh_tx.send(());
             }
+            // An empty session has no agent to remove; its pane is yours.
+            (Some(Action::Remove), Some(a)) if a.session_only => {}
             (Some(action), Some(a)) => {
                 suspend(&mut terminal, &pause_tx, || run_external(&action, &a))?;
                 let _ = refresh_tx.send(());

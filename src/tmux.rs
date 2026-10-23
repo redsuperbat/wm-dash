@@ -3,6 +3,7 @@
 use crate::app::{self, Agent, Preview};
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -35,8 +36,37 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
         a.background = a.status.as_deref() != Some("working") && app::has_background_task(&capture);
         a.activity = app::last_activity(&capture).map(String::from);
     }
-    app::sort_agents(&mut agents);
-    Ok(agents)
+    let sessions = sessions();
+    let paths = sessions.iter().map(|s| s.path.as_str());
+    let paths = paths.chain(agents.iter().filter_map(|a| a.project_path.as_deref().or(a.workdir.as_deref())));
+    let repos: HashMap<String, String> = paths.filter_map(|p| Some((p.to_string(), repo(p)?))).collect();
+    Ok(app::group_by_session(agents, &sessions, &repos))
+}
+
+/// Every tmux session, oldest first.
+fn sessions() -> Vec<app::Session> {
+    let out = tmux(&["list-sessions", "-F", "#{session_created}\t#{session_name}\t#{pane_id}\t#{session_path}"]);
+    let mut sessions: Vec<(u64, app::Session)> = out
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let [created, name, pane, path] = l.splitn(4, '\t').collect::<Vec<_>>()[..] else { return None };
+            let s = app::Session { name: name.into(), path: path.into(), pane: pane.into() };
+            Some((created.parse().unwrap_or(0), s))
+        })
+        .collect();
+    sessions.sort_by_key(|(created, _)| *created);
+    sessions.into_iter().map(|(_, s)| s).collect()
+}
+
+/// The git repo a folder belongs to, the same for all of a repo's worktrees.
+fn repo(path: &str) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Refresh the agent list every 2s, or right away when `refresh` gets a message.
@@ -180,9 +210,10 @@ pub fn set_fitting(on: bool) {
     f.disabled = !on;
 }
 
-/// Split the agent's pane and start another agent beside it in the same directory. The command
-/// is typed into a fresh shell, as workmux does, so the shell and direnv set things up first.
-/// `; exit` closes the pane when the agent quits. Returns the new pane.
+/// Split the agent's pane and start another agent beside it in the same directory, or for an
+/// empty session, in a new window there. The command is typed into a fresh shell, as workmux
+/// does, so the shell and direnv set things up first. `; exit` closes the pane when the agent
+/// quits. Returns the new pane.
 pub fn new_agent(a: &Agent) -> Option<String> {
     let read = |path: &str| std::fs::read_to_string(path.trim()).ok();
     let project = a.project_path.as_deref().and_then(|p| read(&format!("{p}/.workmux.yaml")));
@@ -191,8 +222,13 @@ pub fn new_agent(a: &Agent) -> Option<String> {
     let configs = [project, global];
     let cmd = configs.iter().flatten().find_map(|c| app::agent_cmd(c));
     let dir = a.workdir.as_deref().unwrap_or("#{pane_current_path}");
-    let split = ["split-window", "-dh", "-t", &a.pane_id, "-c", dir, "-P", "-F", "#{pane_id}"];
-    let pane = tmux(&split)?.trim().to_string();
+    let session = format!("={}:", a.session.as_deref().unwrap_or_default());
+    let pane = if a.session_only {
+        tmux(&["new-window", "-d", "-t", &session, "-c", dir, "-P", "-F", "#{pane_id}"])
+    } else {
+        tmux(&["split-window", "-dh", "-t", &a.pane_id, "-c", dir, "-P", "-F", "#{pane_id}"])
+    };
+    let pane = pane?.trim().to_string();
     let cmd = format!("{}; exit", cmd.unwrap_or("claude"));
     tmux(&["send-keys", "-t", &pane, "-l", &cmd, ";", "send-keys", "-t", &pane, "Enter"]);
     Some(pane)
