@@ -240,6 +240,13 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
                 tmux::send_key(&a.pane_id, if c == 'u' { "PPage" } else { "NPage" });
             }
         }
+        // Line steps, as in vim: one mouse wheel notch, as over the preview.
+        KeyCode::Char(c @ ('y' | 'e')) if ctrl => {
+            let wheel = if c == 'y' { MouseEventKind::ScrollUp } else { MouseEventKind::ScrollDown };
+            if let (Some(a), Some(seq)) = (app.selected(), app::mouse_seq(wheel, KeyModifiers::NONE, 0, 0)) {
+                tmux::send_text(&a.pane_id, &seq);
+            }
+        }
         _ if ctrl => {}
         KeyCode::Char('j') | KeyCode::Down => app.move_sel(true),
         KeyCode::Char('k') | KeyCode::Up => app.move_sel(false),
