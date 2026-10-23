@@ -172,6 +172,9 @@ fn run() -> Result<()> {
         match (action, selected) {
             (Some(Action::Quit), _) => return Ok(()),
             (Some(Action::Jump), Some(a)) => {
+                // Give the window its own size back before showing it: a window fitted wider than
+                // the terminal, drawn under our popup, sends tmux 3.7 into an endless redraw.
+                tmux::set_fitting(false);
                 tmux::tmux(&["switch-client", "-t", &a.pane_id]);
                 return Ok(());
             }
