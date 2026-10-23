@@ -18,7 +18,7 @@ use std::io::{BufRead, Stdout, Write, stdout};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::time::Duration;
-use tmux::PreviewReq;
+use tmux::{PreviewMsg, PreviewReq};
 
 /// Everything the main loop reacts to. Workers send these; the loop blocks until one arrives.
 pub enum Msg {
@@ -59,10 +59,16 @@ fn restore() {
     tui_off();
 }
 
+/// Restore, and stop tmux copying the previewed pane's output to us.
+fn exit_cleanup() {
+    restore();
+    tmux::stop_watching();
+}
+
 fn main() -> Result<()> {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore();
+        exit_cleanup();
         prev(info);
         std::process::exit(101);
     }));
@@ -74,14 +80,14 @@ fn main() -> Result<()> {
     ])?;
     std::thread::spawn(move || {
         if let Some(sig) = signals.forever().next() {
-            restore();
+            exit_cleanup();
             std::process::exit(128 + sig);
         }
     });
 
     tui_on()?;
     let res = run();
-    restore();
+    exit_cleanup();
     res
 }
 
@@ -96,8 +102,8 @@ fn run() -> Result<()> {
         move || tmux::list_worker(tx, refresh_rx)
     });
     std::thread::spawn({
-        let tx = tx.clone();
-        move || tmux::preview_worker(tx, req_rx)
+        let (tx, notify) = (tx.clone(), req_tx.clone());
+        move || tmux::preview_worker(tx, req_rx, notify)
     });
     std::thread::spawn({
         let tx = tx.clone();
@@ -202,7 +208,7 @@ fn run() -> Result<()> {
         });
         if new_req != req {
             req = new_req;
-            req_tx.send(req.clone())?;
+            req_tx.send(PreviewMsg::Req(req.clone()))?;
         }
 
         if dirty {

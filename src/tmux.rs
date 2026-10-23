@@ -12,6 +12,8 @@ use std::time::Duration;
 
 pub const LIST_INTERVAL: Duration = Duration::from_secs(2);
 pub const PREVIEW_INTERVAL: Duration = Duration::from_millis(66);
+/// Timer for a watched pane, which mostly updates on its own output.
+const WATCHED_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Run tmux and return stdout, or None when it fails (e.g. the pane is gone).
 pub fn tmux(args: &[&str]) -> Option<String> {
@@ -99,22 +101,45 @@ pub struct PreviewReq {
     pub height: u16,
 }
 
-/// Capture the requested pane about 15 times a second and send it when it changed.
-pub fn preview_worker(tx: Sender<crate::Msg>, reqs: Receiver<Option<PreviewReq>>) {
+/// What the preview worker waits for.
+pub enum PreviewMsg {
+    /// Preview this pane now (None: nothing selected).
+    Req(Option<PreviewReq>),
+    /// The watched pane printed something.
+    Changed,
+}
+
+/// Capture the requested pane whenever it prints something, and send it when it changed. tmux
+/// copies the pane's output into a FIFO (`watch`), so the preview follows the pane as it draws.
+/// A slow timer also catches what prints nothing, like a resize; when the pane can't be watched
+/// (it already has a pipe of its own), the timer runs about 15 times a second instead.
+pub fn preview_worker(tx: Sender<crate::Msg>, msgs: Receiver<PreviewMsg>, notify: Sender<PreviewMsg>) {
+    let fifo = fifo_path();
+    let made = Command::new("mkfifo").arg(&fifo).status().is_ok_and(|s| s.success());
+    if made {
+        std::thread::spawn({
+            let fifo = fifo.clone();
+            move || read_fifo(&fifo, notify)
+        });
+    }
     let mut req = None;
     let mut last = None;
     loop {
-        match reqs.recv_timeout(PREVIEW_INTERVAL) {
-            Ok(r) => {
-                req = r;
-                while let Ok(r) = reqs.try_recv() {
-                    req = r;
+        let interval = if watching() { WATCHED_INTERVAL } else { PREVIEW_INTERVAL };
+        match msgs.recv_timeout(interval) {
+            Ok(m) => {
+                // Take everything queued: a burst of output costs one capture.
+                for m in std::iter::once(m).chain(msgs.try_iter()) {
+                    if let PreviewMsg::Req(r) = m {
+                        req = r;
+                        last = None;
+                    }
                 }
-                last = None;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
+        watch(req.as_ref().map(|r: &PreviewReq| r.pane.as_str()).filter(|_| made), &fifo);
         let Some(r) = &req else {
             fit(None, 0, 0, None);
             continue;
@@ -127,6 +152,63 @@ pub fn preview_worker(tx: Sender<crate::Msg>, reqs: Receiver<Option<PreviewReq>>
             }
         }
     }
+}
+
+/// The FIFO tmux copies the watched pane's output into; one per dashboard.
+fn fifo_path() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("wm-dash-{}.fifo", std::process::id()))
+}
+
+/// Tell the preview worker each time the watched pane prints. The data itself is not needed.
+/// Opening blocks until tmux's `cat` opens the other end; each new pipe opens it again.
+fn read_fifo(fifo: &std::path::Path, notify: Sender<PreviewMsg>) {
+    use std::io::Read;
+    let mut buf = [0; 4096];
+    while let Ok(mut f) = std::fs::File::open(fifo) {
+        while f.read(&mut buf).is_ok_and(|n| n > 0) {
+            if notify.send(PreviewMsg::Changed).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// The watched pane, and whether the pipe on it is ours. Global so exit, panic and signal
+/// handlers can close it.
+static WATCHED: Mutex<(Option<String>, bool)> = Mutex::new((None, false));
+
+/// Point tmux's output pipe at `pane`, closing ours on the previous one. A pane that already has
+/// a pipe (a logging plugin, say) keeps it, and is previewed on the timer instead.
+fn watch(pane: Option<&str>, fifo: &std::path::Path) {
+    let mut w = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
+    if w.0.as_deref() == pane {
+        return;
+    }
+    unwatch_locked(&mut w);
+    w.0 = pane.map(String::from);
+    let Some(pane) = pane else { return };
+    if tmux(&["display", "-p", "-t", pane, "#{pane_pipe}"]).is_some_and(|p| p.trim() == "0") {
+        let cmd = format!("cat > '{}'", fifo.display());
+        w.1 = tmux(&["pipe-pane", "-O", "-t", pane, &cmd]).is_some();
+    }
+}
+
+fn watching() -> bool {
+    WATCHED.lock().unwrap_or_else(|e| e.into_inner()).1
+}
+
+fn unwatch_locked(w: &mut (Option<String>, bool)) {
+    if let (Some(pane), true) = (w.0.take(), w.1) {
+        // No command: closes the pane's pipe.
+        tmux(&["pipe-pane", "-t", &pane]);
+    }
+    w.1 = false;
+}
+
+/// Close our pipe and remove the FIFO, on exit.
+pub fn stop_watching() {
+    unwatch_locked(&mut WATCHED.lock().unwrap_or_else(|e| e.into_inner()));
+    let _ = std::fs::remove_file(fifo_path());
 }
 
 /// One tmux call for pane sizes, cursor and contents. Returns the raw cropped capture (to
