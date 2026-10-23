@@ -10,7 +10,8 @@ const HINTS: &str = " ? keys · q quit";
 
 const KEYS: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move the selection (or click an agent)"),
-    ("ctrl+u/d", "scroll the preview (or the mouse wheel)"),
+    ("ctrl+u/d", "scroll the preview a page"),
+    ("ctrl+k/j", "scroll the preview a little (or the mouse wheel)"),
     ("i", "insert mode: keys go to the agent"),
     ("ctrl+q", "back to the list from insert mode"),
     ("enter", "jump to the agent's pane and quit"),
