@@ -61,6 +61,8 @@ pub fn draw(f: &mut Frame, app: &App) {
         (" INSERT · ctrl+q back to list".into(), Style::new().fg(Color::Green).bold())
     } else if app.filtering {
         (format!(" /{}", app.filter), Style::new().fg(Color::Yellow))
+    } else if let Some(e) = &app.error {
+        (format!(" workmux failed: {e}"), Style::new().fg(Color::Red))
     } else if !app.filter.is_empty() {
         (format!(" /{} · esc clears", app.filter), Style::new().fg(Color::Yellow).dim())
     } else {
@@ -79,7 +81,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let Some(p) = app.preview.as_ref().filter(|p| Some(&p.pane) == app.selected().map(|a| &a.pane_id)) else {
         return;
     };
-    f.render_widget(Paragraph::new(p.text.clone()), inner);
+    f.render_widget(&p.text, inner);
     if let Some((x, y)) = p.cursor.filter(|_| app.insert)
         && x < inner.width
         && y < inner.height
@@ -159,6 +161,19 @@ pub fn agent_at(app: &App, area: Rect, y: u16) -> Option<usize> {
 }
 
 fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+    if app.agents.is_empty() {
+        let msg = if !app.filter.is_empty() {
+            format!(" no agents match /{}", app.filter)
+        } else if app.error.is_some() {
+            " could not list agents".into()
+        } else if !app.loaded {
+            " loading…".into()
+        } else {
+            " no agents or sessions".into()
+        };
+        f.render_widget(Paragraph::new(shorten(&msg, area.width as usize)).style(Style::new().dim()), area);
+        return;
+    }
     let rows = list_rows(app);
     let h = area.height as usize;
     let off = list_offset(&rows, app.sel, area.height);
@@ -259,6 +274,27 @@ mod tests {
         let app = crate::app::App { filter: "api".into(), ..Default::default() };
         term.draw(|f| super::draw(f, &app)).unwrap();
         assert_eq!(footer(&term), " /api · esc clears");
+    }
+
+    #[test]
+    fn empty_and_error() {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 4)).unwrap();
+        let mut rows = |app: &crate::app::App| {
+            term.draw(|f| super::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let row = |y| (0..18).map(|x| buf[(x, y)].symbol()).collect::<String>();
+            (row(0).trim_end().to_string(), row(3).trim_end().to_string(), buf[(1, 3)].fg)
+        };
+        assert_eq!(rows(&crate::app::App::default()).0, " loading…");
+        let app = crate::app::App { loaded: true, ..Default::default() };
+        assert_eq!(rows(&app).0, " no agents or ses…");
+        let app = crate::app::App { loaded: true, filter: "x".into(), ..Default::default() };
+        assert_eq!(rows(&app).0, " no agents match …");
+        // A failed poll: said in the list and, in red, in the footer.
+        let app = crate::app::App { error: Some("boom".into()), ..Default::default() };
+        let (list, footer, fg) = rows(&app);
+        assert_eq!((list.as_str(), footer.as_str()), (" could not list a…", " workmux failed: …"));
+        assert_eq!(fg, ratatui::style::Color::Red);
     }
 
     #[test]

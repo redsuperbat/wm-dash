@@ -361,6 +361,10 @@ pub struct App {
     pub preview: Option<Preview>,
     /// A new agent's placeholder, listed until workmux lists its pane.
     pub pending: Option<Agent>,
+    /// The first list has come in.
+    pub loaded: bool,
+    /// The last list poll failed: why. Cleared by the next good poll.
+    pub error: Option<String>,
 }
 
 impl App {
@@ -441,11 +445,14 @@ impl App {
         self.sel = self.agents.iter().position(|a| a.pane_id == p.pane_id).unwrap_or(self.sel);
     }
 
-    /// Select the next agent that needs you (waiting, stopped or done), after the selection or
-    /// before it, wrapping around.
+    /// Select the next agent that needs you (waiting, stopped, done or no status), after the
+    /// selection or before it, wrapping around. Empty sessions are skipped.
     pub fn next_needing(&mut self, forward: bool) {
         let n = self.agents.len();
-        let needs = |a: &Agent| matches!(a.status(), Status::Waiting | Status::Interrupted | Status::Done);
+        let needs = |a: &Agent| {
+            !a.session_only
+                && matches!(a.status(), Status::Waiting | Status::Interrupted | Status::Done | Status::Unknown)
+        };
         let at = |i| if forward { (self.sel + i) % n } else { (self.sel + n - i) % n };
         if let Some(i) = (1..=n).map(at).find(|&i| needs(&self.agents[i])) {
             self.sel = i;
@@ -523,6 +530,18 @@ mod tests {
         assert_eq!(app.sel, 0);
         app.next_needing(false);
         assert_eq!(app.sel, 2);
+        // No status counts as needing you; an empty session does not.
+        let mut empty = agent("%6", "", "c", "c");
+        empty.session_only = true;
+        let mut all = app.all.clone();
+        all.extend([agent("%5", "", "b", "zz"), empty]);
+        app.set_agents(all);
+        app.next_needing(true);
+        assert_eq!(app.selected().unwrap().pane_id, "%5");
+        app.next_needing(true);
+        assert_eq!(app.selected().unwrap().pane_id, "%1");
+        app.set_agents(app.all[..4].to_vec());
+        app.sel = 2;
 
         // The selection follows its agent through the filter, which ignores case.
         app.filter = "LOGIN".into();

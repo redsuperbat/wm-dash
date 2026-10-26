@@ -27,11 +27,11 @@ pub fn fetch_agents(repos: &mut HashMap<String, Option<String>>) -> Result<Vec<A
     struct Status {
         agents: Vec<Agent>,
     }
-    let out = Command::new("workmux")
-        .args(["status", "--all", "--json"])
-        .stderr(Stdio::null())
-        .output()
-        .context("running workmux")?;
+    let out = Command::new("workmux").args(["status", "--all", "--json"]).output().context("running workmux")?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("{}", err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("workmux status failed").trim());
+    }
     let mut agents = serde_json::from_slice::<Status>(&out.stdout).context("parsing workmux status")?.agents;
     // Read before the captures below, which take a while: elapsed_secs is as of workmux's answer.
     let now = Instant::now();
@@ -117,9 +117,11 @@ fn repo(path: &str) -> Option<String> {
 pub fn list_worker(tx: Sender<crate::Msg>, refresh: Receiver<()>) {
     let mut repos = HashMap::new();
     loop {
-        if let Ok(agents) = fetch_agents(&mut repos)
-            && tx.send(crate::Msg::Agents(agents)).is_err()
-        {
+        let msg = match fetch_agents(&mut repos) {
+            Ok(agents) => crate::Msg::Agents(agents),
+            Err(e) => crate::Msg::ListError(format!("{e:#}")),
+        };
+        if tx.send(msg).is_err() {
             return;
         }
         match refresh.recv_timeout(LIST_INTERVAL) {

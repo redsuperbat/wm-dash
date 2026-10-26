@@ -25,6 +25,8 @@ use tmux::{PreviewMsg, PreviewReq};
 pub enum Msg {
     Term(Event),
     Agents(Vec<Agent>),
+    /// Listing the agents failed: the error, on one line.
+    ListError(String),
     Preview(Preview),
     /// Time to step the spinner.
     Tick,
@@ -128,7 +130,9 @@ fn run() -> Result<()> {
         let mut action = None;
         // Block for the next message, then take whatever else is queued before drawing once.
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
-            dirty |= !matches!(msg, Msg::Tick);
+            // Mouse moves reach the agent as nothing and change nothing on screen.
+            let moved = matches!(&msg, Msg::Term(Event::Mouse(m)) if m.kind == MouseEventKind::Moved);
+            dirty |= !matches!(msg, Msg::Tick) && !moved;
             match msg {
                 Msg::Agents(agents) => {
                     // Drop a new agent's placeholder if its pane closed before the agent started.
@@ -137,8 +141,11 @@ fn run() -> Result<()> {
                     {
                         app.pending = None;
                     }
+                    app.loaded = true;
+                    app.error = None;
                     app.set_agents(agents)
                 }
+                Msg::ListError(e) => app.error = Some(e),
                 Msg::Preview(p) => app.preview = Some(p),
                 Msg::Tick => tick = true,
                 Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => action = handle_key(&mut app, k),

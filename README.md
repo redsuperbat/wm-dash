@@ -22,7 +22,7 @@ In the list:
 | `ctrl+u` / `ctrl+d` | Scroll the preview a page (scrolls the agent's own pane) |
 | `ctrl+y` / `ctrl+e`, mouse wheel | Scroll the preview a little |
 | Mouse over the preview | Select text and click, as in the agent's pane |
-| `tab` / `shift+tab` | Select the next / previous agent that needs you: waiting, interrupted or done |
+| `tab` / `shift+tab` | Select the next / previous agent that needs you: waiting, interrupted, done or no status |
 | `/` | Filter the list by name, branch or title as you type; `enter` keeps the filter, `esc` drops it |
 | `esc` | Clear the filter |
 | `i` | Insert mode: keys go to the agent |
