@@ -5,6 +5,7 @@ use ratatui::style::Color;
 use ratatui::text::Text;
 use serde::Deserialize;
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 /// One agent as reported by `workmux status --all --json`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -20,6 +21,10 @@ pub struct Agent {
     pub workdir: Option<String>,
     /// Seconds since workmux last saw the status change.
     pub elapsed_secs: Option<u64>,
+    /// When the status changed: `elapsed_secs` back from the poll, so the age counts up between
+    /// polls and every poll corrects it (filled in after parsing).
+    #[serde(skip)]
+    pub since: Option<Instant>,
     /// Not an agent: an empty session, listed by its active pane so you can start an agent there.
     #[serde(skip)]
     pub session_only: bool,
@@ -352,6 +357,16 @@ impl App {
 
     /// Replace the list; the selection follows the same pane_id, else stays at the same index.
     pub fn set_agents(&mut self, mut agents: Vec<Agent>) {
+        // elapsed_secs is whole seconds, so each poll lands `since` up to a second off. Keep the old
+        // one when that is all that moved, or the age would step back a second now and then.
+        for a in &mut agents {
+            let old = self.agents.iter().find(|o| o.pane_id == a.pane_id).and_then(|o| o.since);
+            if let (Some(old), Some(new)) = (old, a.since)
+                && old.max(new) - old.min(new) <= Duration::from_secs(1)
+            {
+                a.since = Some(old);
+            }
+        }
         if let Some(p) = &self.pending {
             if agents.iter().any(|a| a.pane_id == p.pane_id) {
                 self.pending = None;
@@ -381,7 +396,7 @@ impl App {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
         let p = Agent {
             status: None,
-            elapsed_secs: None,
+            since: None,
             background: false,
             activity: None,
             session_only: false,
@@ -562,6 +577,20 @@ mod tests {
         assert_eq!(app.sel, 0);
         app.set_agents(vec![]);
         assert!(app.selected().is_none());
+    }
+
+    #[test]
+    fn since_holds_within_a_second() {
+        let t = Instant::now();
+        let at = |secs: u64| Agent { since: Some(t + Duration::from_secs(secs)), ..agent("%1", "", "a", "1") };
+        let mut app = App::default();
+        app.set_agents(vec![at(10)]);
+        app.set_agents(vec![at(11)]); // rounding: keep the old one
+        assert_eq!(app.agents[0].since, Some(t + Duration::from_secs(10)));
+        app.set_agents(vec![at(9)]);
+        assert_eq!(app.agents[0].since, Some(t + Duration::from_secs(10)));
+        app.set_agents(vec![at(30)]); // a new status: take it
+        assert_eq!(app.agents[0].since, Some(t + Duration::from_secs(30)));
     }
 
     #[test]

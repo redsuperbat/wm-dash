@@ -107,7 +107,7 @@ fn list_rows(app: &App) -> Vec<Row> {
         let (icon, color) = status.icon();
         rows.push((format!(" {icon} {title}"), Style::new(), Some(n), Some(color), status.label().into()));
         let branch = a.branch.as_deref().unwrap_or(&a.worktree);
-        let since = a.elapsed_secs.map(ago).unwrap_or_default();
+        let since = a.since.map(|t| ago(t.elapsed().as_secs())).unwrap_or_default();
         rows.push((format!("   \u{e0a0} {branch}"), Style::new().dim(), Some(n), Some(color), since));
         // Spins only while the agent works; otherwise a blank keeps the text lined up.
         let icon = if status == app::Status::Working { spinner() } else { ' ' };
@@ -232,7 +232,8 @@ mod tests {
             title: Some("Docs".into()),
             ..Default::default()
         };
-        let agent = crate::app::Agent { elapsed_secs: Some(300), ..agent };
+        let since = std::time::Instant::now().checked_sub(std::time::Duration::from_secs(300));
+        let agent = crate::app::Agent { since, ..agent };
         let app = crate::app::App { agents: vec![agent.clone(), other], ..Default::default() };
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 9)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();

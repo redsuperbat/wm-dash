@@ -8,7 +8,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const LIST_INTERVAL: Duration = Duration::from_secs(2);
 pub const PREVIEW_INTERVAL: Duration = Duration::from_millis(66);
@@ -32,6 +32,8 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
         .output()
         .context("running workmux")?;
     let mut agents = serde_json::from_slice::<Status>(&out.stdout).context("parsing workmux status")?.agents;
+    // Read before the captures below, which take a while: elapsed_secs is as of workmux's answer.
+    let now = Instant::now();
     for a in &mut agents {
         // -J joins wrapped lines, so a long activity line comes through whole.
         let capture = tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default();
@@ -40,6 +42,7 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
         }
         a.background = a.status.as_deref() != Some("working") && app::has_background_task(&capture);
         a.activity = app::last_activity(&capture).map(String::from);
+        a.since = a.elapsed_secs.and_then(|s| now.checked_sub(Duration::from_secs(s)));
     }
     let sessions = sessions();
     let paths = sessions.iter().map(|s| s.path.as_str());

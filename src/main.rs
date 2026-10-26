@@ -123,8 +123,9 @@ fn run() -> Result<()> {
         let mut action = None;
         // Block for the next message, then take whatever else is queued before drawing once.
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
-            // A tick only needs a redraw while some agent's spinner is showing.
-            dirty |= !matches!(msg, Msg::Tick) || app.agents.iter().any(|a| a.status() == app::Status::Working);
+            // A tick only needs a redraw while some agent's spinner or age is showing.
+            dirty |= !matches!(msg, Msg::Tick)
+                || app.agents.iter().any(|a| a.since.is_some() || a.status() == app::Status::Working);
             match msg {
                 Msg::Agents(agents) => {
                     // Drop a new agent's placeholder if its pane closed before the agent started.
