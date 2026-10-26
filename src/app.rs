@@ -394,7 +394,11 @@ impl App {
     /// List a just-split pane as a placeholder agent like `like`, and select it.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
+        // It starts in the main checkout (see tmux::new_agent), not in `like`'s worktree.
         let p = Agent {
+            workdir: like.project_path.clone().or(p.workdir),
+            worktree: "main checkout".into(),
+            branch: None,
             status: None,
             since: None,
             background: false,

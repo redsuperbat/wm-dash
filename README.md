@@ -29,7 +29,7 @@ In the list:
 | `t` | Open a shell in the agent's working directory; `exit` comes back |
 | `g` | Open the branch's GitHub PR in the browser, or the page to create one |
 | `r` | Remove the agent and its worktree (asks first) |
-| `n` | Start a new agent in a new window right after the selected agent's, in the same session and directory |
+| `n` | Start a new agent in a new window right after the selected agent's, in the same session, in the repo's main checkout |
 | `?` | Show all keys |
 | `q`, `ctrl+c` | Quit |
 

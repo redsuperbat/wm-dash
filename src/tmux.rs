@@ -304,7 +304,8 @@ pub fn set_fitting(on: bool) {
     f.disabled = !on;
 }
 
-/// Start another agent in a new window right after the agent's own, in the same directory. A
+/// Start another agent in a new window right after the agent's own, in the repo's main checkout
+/// rather than the agent's worktree, so it starts from the main branch. A
 /// window rather than a split, so previewing one agent never squeezes another. The command is
 /// typed into a fresh shell, as workmux does, so the shell and direnv set things up first.
 /// `; exit` closes the window when the agent quits. Returns the new pane.
@@ -315,7 +316,7 @@ pub fn new_agent(a: &Agent) -> Option<String> {
     let global = global.and_then(|o| read(&String::from_utf8_lossy(&o.stdout)));
     let configs = [project, global];
     let cmd = configs.iter().flatten().find_map(|c| app::agent_cmd(c));
-    let dir = a.workdir.as_deref().unwrap_or("#{pane_current_path}");
+    let dir = a.project_path.as_deref().or(a.workdir.as_deref()).unwrap_or("#{pane_current_path}");
     // new-window wants a window, not a pane.
     let window = tmux(&["display", "-p", "-t", &a.pane_id, "#{window_id}"])?;
     let new = ["new-window", "-ad", "-t", window.trim(), "-c", dir, "-P", "-F", "#{pane_id}"];
