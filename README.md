@@ -35,6 +35,20 @@ In the list:
 
 In insert mode, every key and paste goes to the agent. `ctrl+q` takes you back to the list.
 
+## Config
+
+Optional, in `~/.config/wm-dash.json`:
+
+```json
+{
+  "layout_ratio": { "list": 30, "preview": 70 }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `layout_ratio.list`, `layout_ratio.preview` | `30`, `70` | How the width is shared between the agent list and the preview, as a ratio: `30`/`70`, `3`/`7` and `1`/`2` all work |
+
 ## Build
 
 ```sh

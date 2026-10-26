@@ -36,7 +36,8 @@ fn spinner() -> char {
 
 /// Width of the agent list column.
 pub fn list_width(width: u16) -> u16 {
-    width * 3 / 10
+    let l = &crate::config::get().layout_ratio;
+    (width as u32 * l.list as u32 / (l.list as u32 + l.preview as u32)) as u16
 }
 
 /// The preview box: everything right of the list.

@@ -1,6 +1,7 @@
 //! Workmux agent dashboard: agent list on the left, live preview of the selected agent on the right.
 
 mod app;
+mod config;
 mod tmux;
 mod ui;
 
@@ -66,6 +67,7 @@ fn exit_cleanup() {
 }
 
 fn main() -> Result<()> {
+    config::load()?;
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         exit_cleanup();
