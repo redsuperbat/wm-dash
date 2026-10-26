@@ -102,9 +102,15 @@ impl Agent {
     }
 }
 
-/// Grouped by project, then by status inside each project.
+/// Grouped by project, then by status inside each project. No status ranks as done.
 pub fn sort_agents(agents: &mut [Agent]) {
-    agents.sort_by_cached_key(|a| (a.project.clone(), a.status(), a.worktree.clone()));
+    agents.sort_by_cached_key(|a| {
+        let rank = match a.status() {
+            Status::Unknown => Status::Done,
+            s => s,
+        };
+        (a.project.clone(), rank, a.worktree.clone())
+    });
 }
 
 /// A pane running this command is back at its shell prompt.
@@ -447,6 +453,7 @@ mod tests {
         let mut agents = vec![
             agent("%1", "working", "b", "x"),
             agent("%2", "", "a", "x"),
+            agent("%8", "done", "a", "y"),
             bg,
             agent("%3", "done", "z", "x"),
             agent("%4", "waiting", "b", "x"),
@@ -455,8 +462,8 @@ mod tests {
         ];
         sort_agents(&mut agents);
         let ids: Vec<_> = agents.iter().map(|a| a.pane_id.as_str()).collect();
-        assert_eq!(ids, ["%7", "%5", "%6", "%2", "%4", "%1", "%3"]);
-        assert_eq!(agents[1].status(), Status::Background);
+        assert_eq!(ids, ["%7", "%2", "%8", "%5", "%6", "%4", "%1", "%3"]);
+        assert_eq!(agents[3].status(), Status::Background);
     }
 
     #[test]
