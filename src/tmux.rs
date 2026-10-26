@@ -21,7 +21,8 @@ pub fn tmux(args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-pub fn fetch_agents() -> Result<Vec<Agent>> {
+/// `repos` caches each folder's repo (None: not in one) across polls, as it never changes.
+pub fn fetch_agents(repos: &mut HashMap<String, Option<String>>) -> Result<Vec<Agent>> {
     #[derive(serde::Deserialize)]
     struct Status {
         agents: Vec<Agent>,
@@ -34,9 +35,8 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
     let mut agents = serde_json::from_slice::<Status>(&out.stdout).context("parsing workmux status")?.agents;
     // Read before the captures below, which take a while: elapsed_secs is as of workmux's answer.
     let now = Instant::now();
-    for a in &mut agents {
-        // -J joins wrapped lines, so a long activity line comes through whole.
-        let capture = tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default();
+    let captures = captures(&agents);
+    for (a, capture) in agents.iter_mut().zip(captures) {
         if a.status.as_deref() == Some("working") && app::is_interrupted(&capture) {
             a.status = Some("interrupted".into());
         }
@@ -47,14 +47,44 @@ pub fn fetch_agents() -> Result<Vec<Agent>> {
     let sessions = sessions();
     let paths = sessions.iter().map(|s| s.path.as_str());
     let paths = paths.chain(agents.iter().filter_map(|a| a.project_path.as_deref().or(a.workdir.as_deref())));
-    let repos: HashMap<String, String> = paths.filter_map(|p| Some((p.to_string(), repo(p)?))).collect();
-    let mut agents = app::group_by_session(agents, &sessions, &repos);
+    // ponytail: never evicted, and a folder that becomes a repo later is only seen after a restart.
+    for p in paths {
+        if !repos.contains_key(p) {
+            repos.insert(p.to_string(), repo(p));
+        }
+    }
+    let found: HashMap<String, String> = repos.iter().filter_map(|(p, r)| Some((p.clone(), r.clone()?))).collect();
+    let mut agents = app::group_by_session(agents, &sessions, &found);
     let commands = tmux(&["list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}"]).unwrap_or_default();
     let commands: HashMap<&str, &str> = commands.lines().filter_map(|l| l.split_once(' ')).collect();
     for a in &mut agents {
         a.exited = commands.get(a.pane_id.as_str()).is_some_and(|c| app::is_shell(c));
     }
     Ok(agents)
+}
+
+/// Each agent's pane text, in one tmux call with a marker line before each capture. A pane gone
+/// stops the whole chain, so then it goes pane by pane. -J joins wrapped lines, so a long activity
+/// line comes through whole.
+fn captures(agents: &[Agent]) -> Vec<String> {
+    let mut args = Vec::new();
+    for a in agents {
+        args.extend([";", "display", "-p", MARK, ";", "capture-pane", "-pJ", "-t", &a.pane_id]);
+    }
+    let batch = args.get(1..).filter(|a| !a.is_empty()).and_then(tmux);
+    if let Some(parts) = batch.and_then(|out| split_captures(&out, agents.len())) {
+        return parts;
+    }
+    agents.iter().map(|a| tmux(&["capture-pane", "-pJ", "-t", &a.pane_id]).unwrap_or_default()).collect()
+}
+
+/// Printed before each capture in the batch; no pane text holds this control character.
+const MARK: &str = "\x1f";
+
+/// The `n` captures in a batch's output, or None when it holds a different number.
+fn split_captures(out: &str, n: usize) -> Option<Vec<String>> {
+    let parts: Vec<String> = out.split(&format!("{MARK}\n")).skip(1).map(String::from).collect();
+    (parts.len() == n).then_some(parts)
 }
 
 /// Every tmux session, oldest first.
@@ -85,8 +115,9 @@ fn repo(path: &str) -> Option<String> {
 
 /// Refresh the agent list every 2s, or right away when `refresh` gets a message.
 pub fn list_worker(tx: Sender<crate::Msg>, refresh: Receiver<()>) {
+    let mut repos = HashMap::new();
     loop {
-        if let Ok(agents) = fetch_agents()
+        if let Ok(agents) = fetch_agents(&mut repos)
             && tx.send(crate::Msg::Agents(agents)).is_err()
         {
             return;
@@ -349,4 +380,16 @@ pub fn paste(pane: &str, text: &str) {
         let _ = stdin.write_all(text.as_bytes());
     }
     let _ = child.wait();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn split_captures() {
+        let out = "\x1f\na\n\nb\n\x1f\nc\n";
+        assert_eq!(super::split_captures(out, 2), Some(vec!["a\n\nb\n".into(), "c\n".into()]));
+        // One pane short: the batch can't be trusted.
+        assert_eq!(super::split_captures(out, 3), None);
+        assert_eq!(super::split_captures("", 0), Some(vec![]));
+    }
 }

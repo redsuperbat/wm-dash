@@ -120,14 +120,15 @@ fn run() -> Result<()> {
     let mut app = App::default();
     let mut req = None;
     terminal.draw(|f| ui::draw(f, &app))?;
+    // The list as last drawn: a tick redraws only when a spinner frame or an age changed it.
+    let mut drawn_rows = ui::list_rows(&app);
     loop {
         let mut dirty = false;
+        let mut tick = false;
         let mut action = None;
         // Block for the next message, then take whatever else is queued before drawing once.
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
-            // A tick only needs a redraw while some agent's spinner or age is showing.
-            dirty |= !matches!(msg, Msg::Tick)
-                || app.agents.iter().any(|a| a.since.is_some() || a.status() == app::Status::Working);
+            dirty |= !matches!(msg, Msg::Tick);
             match msg {
                 Msg::Agents(agents) => {
                     // Drop a new agent's placeholder if its pane closed before the agent started.
@@ -139,7 +140,7 @@ fn run() -> Result<()> {
                     app.set_agents(agents)
                 }
                 Msg::Preview(p) => app.preview = Some(p),
-                Msg::Tick => {}
+                Msg::Tick => tick = true,
                 Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => action = handle_key(&mut app, k),
                 Msg::Term(Event::Paste(text)) if app.insert => {
                     if let Some(a) = app.selected() {
@@ -209,8 +210,12 @@ fn run() -> Result<()> {
             req_tx.send(PreviewMsg::Req(req.clone()))?;
         }
 
-        if dirty {
-            terminal.draw(|f| ui::draw(f, &app))?;
+        if dirty || tick {
+            let rows = ui::list_rows(&app);
+            if dirty || rows != drawn_rows {
+                terminal.draw(|f| ui::draw(f, &app))?;
+                drawn_rows = rows;
+            }
         }
     }
 }
@@ -223,6 +228,25 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         } else if let (Some(a), Some(key)) = (app.selected(), app::tmux_key(k)) {
             tmux::send_key(&a.pane_id, &key);
         }
+        return None;
+    }
+    if app.filtering && !ctrl {
+        // Typing the filter; enter keeps it, esc drops it. The arrows still move the selection.
+        match k.code {
+            KeyCode::Char(c) => app.filter.push(c),
+            KeyCode::Backspace => _ = app.filter.pop(),
+            KeyCode::Enter => app.filtering = false,
+            KeyCode::Esc => {
+                app.filtering = false;
+                app.filter.clear();
+            }
+            KeyCode::Down => app.move_sel(true),
+            KeyCode::Up => app.move_sel(false),
+            KeyCode::Tab => app.next_needing(true),
+            KeyCode::BackTab => app.next_needing(false),
+            _ => {}
+        }
+        app.apply_filter();
         return None;
     }
     if app.help {
@@ -248,6 +272,8 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         _ if ctrl => {}
         KeyCode::Char('j') | KeyCode::Down => app.move_sel(true),
         KeyCode::Char('k') | KeyCode::Up => app.move_sel(false),
+        KeyCode::Tab => app.next_needing(true),
+        KeyCode::BackTab => app.next_needing(false),
         KeyCode::Char('i') => app.insert = app.selected().is_some(),
         KeyCode::Enter => return Some(Action::Jump),
         KeyCode::Char('l') => return Some(Action::Lazygit),
@@ -256,6 +282,11 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         KeyCode::Char('g') => return Some(Action::Pr),
         KeyCode::Char('r') => return Some(Action::Remove),
         KeyCode::Char('n') => return Some(Action::New),
+        KeyCode::Char('/') => app.filtering = true,
+        KeyCode::Esc => {
+            app.filter.clear();
+            app.apply_filter();
+        }
         KeyCode::Char('?') => app.help = true,
         KeyCode::Char('q') => return Some(Action::Quit),
         _ => {}
@@ -364,4 +395,56 @@ fn ask(prompt: &str) -> String {
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
     line.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn press(app: &mut App, code: KeyCode) -> Option<Action> {
+        handle_key(app, KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn filter_keys() {
+        let agent = |pane: &str, status: &str, worktree: &str| Agent {
+            pane_id: pane.into(),
+            status: Some(status.into()),
+            project: Some("p".into()),
+            worktree: worktree.into(),
+            ..Default::default()
+        };
+        let mut app = App::default();
+        app.set_agents(vec![agent("%1", "working", "api"), agent("%2", "done", "query"), agent("%3", "done", "ui")]);
+
+        press(&mut app, KeyCode::Char('/'));
+        assert!(app.filtering);
+        // Letters go to the filter, even ones that are keys in the list: q does not quit.
+        for c in "qx".chars() {
+            assert!(press(&mut app, KeyCode::Char(c)).is_none());
+        }
+        assert_eq!((app.filter.as_str(), app.agents.len()), ("qx", 0));
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.agents.iter().map(|a| a.pane_id.as_str()).collect::<Vec<_>>(), ["%2"]);
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.filtering);
+        assert_eq!((app.filter.as_str(), app.agents.len()), ("q", 1));
+        // Out of the filter, q quits again and esc clears the filter.
+        assert!(matches!(press(&mut app, KeyCode::Char('q')), Some(Action::Quit)));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!((app.filter.as_str(), app.agents.len()), ("", 3));
+
+        // Esc while typing drops the filter; tab still moves to an agent that needs you.
+        press(&mut app, KeyCode::Char('/'));
+        press(&mut app, KeyCode::Char('u'));
+        assert_eq!(app.agents.len(), 2);
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.filtering);
+        assert_eq!(app.agents.len(), 3);
+        app.sel = 0;
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.selected().map(|a| a.pane_id.as_str()), Some("%2"));
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.selected().map(|a| a.pane_id.as_str()), Some("%3"));
+    }
 }

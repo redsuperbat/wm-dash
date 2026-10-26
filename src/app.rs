@@ -346,7 +346,14 @@ pub struct Preview {
 
 #[derive(Debug, Default)]
 pub struct App {
+    /// Every agent, as last polled.
+    pub all: Vec<Agent>,
+    /// The agents shown: those matching `filter`.
     pub agents: Vec<Agent>,
+    /// Shows only agents whose name, branch or title contains it, ignoring case.
+    pub filter: String,
+    /// Typing the filter: keys go to it.
+    pub filtering: bool,
     pub sel: usize,
     pub insert: bool,
     /// The key help popover is open.
@@ -361,12 +368,12 @@ impl App {
         self.agents.get(self.sel)
     }
 
-    /// Replace the list; the selection follows the same pane_id, else stays at the same index.
+    /// Replace the list.
     pub fn set_agents(&mut self, mut agents: Vec<Agent>) {
         // elapsed_secs is whole seconds, so each poll lands `since` up to a second off. Keep the old
         // one when that is all that moved, or the age would step back a second now and then.
         for a in &mut agents {
-            let old = self.agents.iter().find(|o| o.pane_id == a.pane_id).and_then(|o| o.since);
+            let old = self.all.iter().find(|o| o.pane_id == a.pane_id).and_then(|o| o.since);
             if let (Some(old), Some(new)) = (old, a.since)
                 && old.max(new) - old.min(new) <= Duration::from_secs(1)
             {
@@ -381,6 +388,19 @@ impl App {
                 sort_agents(&mut agents);
             }
         }
+        self.all = agents;
+        self.apply_filter();
+    }
+
+    /// Show the agents matching the filter; the selection follows the same pane_id, else stays at
+    /// the same index.
+    pub fn apply_filter(&mut self) {
+        let f = self.filter.to_lowercase();
+        let matches = |a: &&Agent| {
+            let text = [a.name(), a.branch.clone().unwrap_or_default(), a.title.clone().unwrap_or_default()];
+            text.iter().any(|t| t.to_lowercase().contains(&f))
+        };
+        let agents: Vec<Agent> = self.all.iter().filter(matches).cloned().collect();
         let before = self.selected().map(|a| (a.pane_id.clone(), a.exited));
         let current = before.as_ref().map(|(id, _)| id);
         self.sel = current
@@ -414,9 +434,22 @@ impl App {
             ..p
         };
         self.pending = Some(p.clone());
-        let agents = std::mem::take(&mut self.agents);
+        // Clear the filter, which could hide the new agent.
+        self.filter.clear();
+        let agents = std::mem::take(&mut self.all);
         self.set_agents(agents);
         self.sel = self.agents.iter().position(|a| a.pane_id == p.pane_id).unwrap_or(self.sel);
+    }
+
+    /// Select the next agent that needs you (waiting, stopped or done), after the selection or
+    /// before it, wrapping around.
+    pub fn next_needing(&mut self, forward: bool) {
+        let n = self.agents.len();
+        let needs = |a: &Agent| matches!(a.status(), Status::Waiting | Status::Interrupted | Status::Done);
+        let at = |i| if forward { (self.sel + i) % n } else { (self.sel + n - i) % n };
+        if let Some(i) = (1..=n).map(at).find(|&i| needs(&self.agents[i])) {
+            self.sel = i;
+        }
     }
 
     pub fn move_sel(&mut self, down: bool) {
@@ -472,6 +505,40 @@ mod tests {
         assert_eq!(clean_title("⠂ 2 tasks"), "2 tasks");
         assert_eq!(clean_title("Ölfass"), "Ölfass");
         assert_eq!(clean_title("✳ "), "");
+    }
+
+    #[test]
+    fn next_needing_and_filter() {
+        let mut app = App::default();
+        app.set_agents(vec![
+            agent("%1", "waiting", "a", "login"),
+            agent("%2", "working", "a", "docs"),
+            agent("%3", "done", "b", "login-fix"),
+            agent("%4", "working", "b", "api"),
+        ]);
+        app.sel = 1;
+        app.next_needing(true);
+        assert_eq!(app.sel, 2);
+        app.next_needing(true); // wraps around, past the working ones
+        assert_eq!(app.sel, 0);
+        app.next_needing(false);
+        assert_eq!(app.sel, 2);
+
+        // The selection follows its agent through the filter, which ignores case.
+        app.filter = "LOGIN".into();
+        app.apply_filter();
+        let ids: Vec<_> = app.agents.iter().map(|a| a.pane_id.as_str()).collect();
+        assert_eq!((ids, app.sel), (vec!["%1", "%3"], 1));
+        // A poll keeps the filter.
+        let all = app.all.clone();
+        app.set_agents(all);
+        assert_eq!(app.agents.len(), 2);
+        app.filter = "b/".into(); // project/worktree
+        app.apply_filter();
+        assert_eq!(app.agents.len(), 2);
+        app.filter.clear();
+        app.apply_filter();
+        assert_eq!(app.agents.len(), 4);
     }
 
     #[test]

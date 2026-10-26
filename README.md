@@ -4,7 +4,7 @@ A full-screen dashboard for [workmux](https://github.com/raine/workmux) agents: 
 
 Agents are grouped by tmux session, one session per repo: when several sessions are on the same repo, only the oldest is listed. Sessions without agents are listed too; select one and press `n` to start an agent there.
 
-Agents that need you come first: waiting, interrupted, done, idle with a background task, then working.
+Agents that need you come first: waiting, interrupted, done (or no status), idle with a background task, then working.
 
 Run it in a tmux popup:
 
@@ -22,6 +22,9 @@ In the list:
 | `ctrl+u` / `ctrl+d` | Scroll the preview a page (scrolls the agent's own pane) |
 | `ctrl+y` / `ctrl+e`, mouse wheel | Scroll the preview a little |
 | Mouse over the preview | Select text and click, as in the agent's pane |
+| `tab` / `shift+tab` | Select the next / previous agent that needs you: waiting, interrupted or done |
+| `/` | Filter the list by name, branch or title as you type; `enter` keeps the filter, `esc` drops it |
+| `esc` | Clear the filter |
 | `i` | Insert mode: keys go to the agent |
 | `enter` | Jump to the agent's pane and quit |
 | `l` | Open lazygit in the agent's working directory |

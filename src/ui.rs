@@ -4,12 +4,15 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::time::{Duration, SystemTime};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const KEYS: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move the selection (or click an agent)"),
     ("ctrl+u/d", "scroll the preview a page"),
     ("ctrl+y/e", "scroll the preview a little (or the mouse wheel)"),
+    ("tab", "next agent that needs you (shift+tab: previous)"),
+    ("/", "filter by name, branch or title (enter keeps)"),
+    ("esc", "clear the filter"),
     ("i", "insert mode: keys go to the agent"),
     ("ctrl+q", "back to the list from insert mode"),
     ("enter", "jump to the agent's pane and quit"),
@@ -55,12 +58,20 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_list(f, app, list);
 
     let (footer, style) = if app.insert {
-        (" INSERT · ctrl+q back to list", Style::new().fg(Color::Green).bold())
+        (" INSERT · ctrl+q back to list".into(), Style::new().fg(Color::Green).bold())
+    } else if app.filtering {
+        (format!(" /{}", app.filter), Style::new().fg(Color::Yellow))
+    } else if !app.filter.is_empty() {
+        (format!(" /{} · esc clears", app.filter), Style::new().fg(Color::Yellow).dim())
     } else {
-        (" i to type · ? keys · q quit", Style::new().dim())
+        (" i to type · / filter · ? keys".into(), Style::new().dim())
     };
     let footer_row = Rect { y: list.y + list.height, height: 1, ..list };
-    f.render_widget(Paragraph::new(shorten(footer, list.width as usize)).style(style), footer_row);
+    f.render_widget(Paragraph::new(shorten(&footer, list.width as usize)).style(style), footer_row);
+    if app.filtering {
+        let x = (footer.width() as u16).min(footer_row.width.saturating_sub(1));
+        f.set_cursor_position((footer_row.x + x, footer_row.y));
+    }
     let inner = preview_area(area);
     let divider = Rect { x: inner.x - 1, width: 1, ..area };
     f.render_widget(Block::new().borders(Borders::LEFT).border_style(style), divider);
@@ -94,9 +105,9 @@ fn draw_help(f: &mut Frame, area: Rect) {
 /// A header row per project, then 3 rows per agent: icon + title, branch, latest activity.
 /// Each row is (text, style, agent index, status color, right-aligned text). The status color
 /// tints the icon, the right text and the selection bar.
-type Row = (String, Style, Option<usize>, Option<Color>, String);
+pub type Row = (String, Style, Option<usize>, Option<Color>, String);
 
-fn list_rows(app: &App) -> Vec<Row> {
+pub fn list_rows(app: &App) -> Vec<Row> {
     let mut rows = Vec::new();
     for (n, a) in app.agents.iter().enumerate() {
         // An empty session is just its header, and selectable.
@@ -231,6 +242,23 @@ mod tests {
             let green = buf[(12, 0)].fg == ratatui::style::Color::Green;
             assert_eq!(green, insert, "the divider turns green in insert mode");
         }
+    }
+
+    #[test]
+    fn filter_footer() {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 4)).unwrap();
+        let footer = |term: &ratatui::Terminal<ratatui::backend::TestBackend>| {
+            (0..18).map(|x| term.backend().buffer()[(x, 3)].symbol()).collect::<String>()
+        };
+        // Typing: the filter, with the cursor right after it.
+        let app = crate::app::App { filter: "api".into(), filtering: true, ..Default::default() };
+        term.draw(|f| super::draw(f, &app)).unwrap();
+        assert_eq!(footer(&term), " /api             ");
+        term.backend_mut().assert_cursor_position((5, 3));
+        // Kept: the filter and how to clear it.
+        let app = crate::app::App { filter: "api".into(), ..Default::default() };
+        term.draw(|f| super::draw(f, &app)).unwrap();
+        assert_eq!(footer(&term), " /api · esc clears");
     }
 
     #[test]
