@@ -86,31 +86,45 @@ fn draw_help(f: &mut Frame, area: Rect) {
 }
 
 /// A header row per project, then 3 rows per agent: icon + title, branch, latest activity.
-/// Each row is (text, style, agent index, icon color).
-type Row = (String, Style, Option<usize>, Option<Color>);
+/// Each row is (text, style, agent index, status color, right-aligned text). The status color
+/// tints the icon, the right text and the selection bar.
+type Row = (String, Style, Option<usize>, Option<Color>, String);
 
 fn list_rows(app: &App) -> Vec<Row> {
     let mut rows = Vec::new();
     for (n, a) in app.agents.iter().enumerate() {
         // An empty session is just its header, and selectable.
         if a.session_only {
-            rows.push((format!(" {}", a.worktree), Style::new().bold(), Some(n), None));
+            rows.push((format!(" {}", a.worktree), Style::new().bold(), Some(n), None, String::new()));
             continue;
         }
         if n == 0 || app.agents[n - 1].project != a.project {
-            rows.push((format!(" {}", a.project.as_deref().unwrap_or("other")), Style::new().bold(), None, None));
+            let project = format!(" {}", a.project.as_deref().unwrap_or("other"));
+            rows.push((project, Style::new().bold(), None, None, String::new()));
         }
         let title = app::clean_title(a.title.as_deref().unwrap_or_default());
-        let (icon, color) = a.status().icon();
-        rows.push((format!(" {icon} {title}"), Style::new(), Some(n), Some(color)));
+        let status = a.status();
+        let (icon, color) = status.icon();
+        rows.push((format!(" {icon} {title}"), Style::new(), Some(n), Some(color), status.label().into()));
         let branch = a.branch.as_deref().unwrap_or(&a.worktree);
-        rows.push((format!("   \u{e0a0} {branch}"), Style::new().dim(), Some(n), None));
+        let since = a.elapsed_secs.map(ago).unwrap_or_default();
+        rows.push((format!("   \u{e0a0} {branch}"), Style::new().dim(), Some(n), Some(color), since));
         // Spins only while the agent works; otherwise a blank keeps the text lined up.
-        let icon = if a.status() == app::Status::Working { spinner() } else { ' ' };
+        let icon = if status == app::Status::Working { spinner() } else { ' ' };
         let activity = a.activity.as_deref().map(|t| format!("   {icon} {t}")).unwrap_or_default();
-        rows.push((activity, Style::new().dim(), Some(n), None));
+        rows.push((activity, Style::new().dim(), Some(n), Some(color), String::new()));
     }
     rows
+}
+
+/// "42s", "5m", "3h", "2d".
+fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86400),
+    }
 }
 
 /// First list row shown, scrolled so all of the selection's rows stay above the last row.
@@ -131,25 +145,42 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let h = area.height as usize;
     let off = list_offset(&rows, app.sel, area.height);
     for r in 0..h {
-        let (text, style) = match rows.get(off + r) {
-            Some((_, _, Some(n), _)) if *n == app.sel => {
-                (rows[off + r].0.clone(), Style::new().add_modifier(Modifier::REVERSED))
-            }
-            Some((text, style, _, _)) => (text.clone(), *style),
-            None if r == h - 1 => (HINTS.into(), Style::new().dim()),
-            None => continue,
-        };
         let row = Rect { y: area.y + r as u16, height: 1, ..area };
-        f.render_widget(Paragraph::new(shorten(&text, area.width as usize)).style(style), row);
-        // Not on the selected row: reversed, the color would fill the icon's cell instead.
-        if let Some((_, _, n, Some(color))) = rows.get(off + r)
-            && *n != Some(app.sel)
-            && area.width > 1
-        {
-            f.buffer_mut()[(area.x + 1, row.y)].set_fg(*color);
+        let Some((text, style, n, color, right)) = rows.get(off + r) else {
+            if r == h - 1 {
+                f.render_widget(Paragraph::new(shorten(HINTS, area.width as usize)).style(Style::new().dim()), row);
+            }
+            continue;
+        };
+        let selected = *n == Some(app.sel);
+        if selected {
+            f.render_widget(Block::new().style(Style::new().bg(SELECTED_BG)), row);
+        }
+        // Keep a gap between the text and the right column; drop the right text when it won't fit.
+        let rw = right.chars().count() as u16;
+        let rw = if rw > 0 && rw + 10 <= area.width { rw + 2 } else { 0 };
+        let left = Rect { width: area.width - rw, ..row };
+        f.render_widget(Paragraph::new(shorten(text, left.width as usize)).style(*style), left);
+        let Some(color) = *color else { continue };
+        // The title row's icon and label take the status color; the rows under it stay dim.
+        let title = !style.add_modifier.contains(Modifier::DIM);
+        if rw > 0 {
+            let r = Rect { x: area.x + area.width - rw, width: rw, ..row };
+            let st = if title { Style::new().fg(color).bold() } else { *style };
+            f.render_widget(Paragraph::new(format!(" {right} ")).style(st), r);
+        }
+        let buf = f.buffer_mut();
+        if title && area.width > 1 {
+            buf[(area.x + 1, row.y)].set_fg(color);
+        }
+        if selected {
+            buf[(area.x, row.y)].set_symbol("▌").set_fg(color);
         }
     }
 }
+
+/// Background of the selected agent's rows: faint, so the status colors stay readable.
+const SELECTED_BG: Color = Color::Indexed(236);
 
 /// Cut to `width` columns, ending in "…" when cut.
 fn shorten(s: &str, width: usize) -> String {
@@ -201,19 +232,26 @@ mod tests {
             title: Some("Docs".into()),
             ..Default::default()
         };
+        let agent = crate::app::Agent { elapsed_secs: Some(300), ..agent };
         let app = crate::app::App { agents: vec![agent.clone(), other], ..Default::default() };
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 9)).unwrap();
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 9)).unwrap();
         term.draw(|f| super::draw_list(f, &app, f.area())).unwrap();
         let buf = term.backend().buffer();
-        let row = |y| (0..20).map(|x| buf[(x, y)].symbol()).collect::<String>();
+        let row = |y| (0..30).map(|x| buf[(x, y)].symbol()).collect::<String>();
         assert!(row(0).starts_with(" p "), "{:?}", row(0));
-        assert!(row(1).starts_with(" \u{f06a9} Fix login"), "{:?}", row(1));
-        // Agent 0 is selected, so its icon is plain; agent 1's is colored.
-        assert_eq!(buf[(1, 1)].fg, ratatui::style::Color::Reset);
+        // Agent 0 is selected: a bar in its status color, then its status and age on the right.
+        assert!(row(1).starts_with("▌\u{f06a9} Fix login  ") && row(1).ends_with(" WORKING "), "{:?}", row(1));
+        assert_eq!(buf[(0, 1)].fg, ratatui::style::Color::Magenta);
+        assert_eq!(buf[(0, 1)].bg, super::SELECTED_BG);
+        assert_eq!(buf[(22, 1)].fg, ratatui::style::Color::Magenta);
+        // Icons keep their color, selected or not.
+        assert_eq!(buf[(1, 1)].fg, ratatui::style::Color::Magenta);
         assert_eq!(buf[(1, 5)].fg, ratatui::style::Color::Green);
-        assert!(row(2).starts_with("   \u{e0a0} feat"), "{:?}", row(2));
-        // No activity yet: an empty row, so every agent takes the same height.
-        assert_eq!(row(3).trim(), "");
+        assert!(row(5).ends_with(" DONE "), "{:?}", row(5));
+        assert_eq!(buf[(0, 5)].symbol(), " ");
+        assert!(row(2).starts_with("▌  \u{e0a0} feat  ") && row(2).ends_with(" 5m "), "{:?}", row(2));
+        // No activity yet: an empty row (but for the bar), so every agent takes the same height.
+        assert_eq!(row(3).trim(), "▌");
         // The next group's header follows right away.
         assert!(row(4).starts_with(" q "), "{:?}", row(4));
         assert!(row(6).starts_with("   \u{e0a0} wt2"), "{:?}", row(6));

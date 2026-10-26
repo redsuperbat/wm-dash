@@ -18,6 +18,8 @@ pub struct Agent {
     pub title: Option<String>,
     pub project_path: Option<String>,
     pub workdir: Option<String>,
+    /// Seconds since workmux last saw the status change.
+    pub elapsed_secs: Option<u64>,
     /// Not an agent: an empty session, listed by its active pane so you can start an agent there.
     #[serde(skip)]
     pub session_only: bool,
@@ -53,6 +55,18 @@ impl Status {
             Status::Background => ("\u{f252}", Color::Blue),
             Status::Working => ("\u{f06a9}", Color::Magenta),
             Status::Unknown => (" ", Color::Reset),
+        }
+    }
+
+    /// Short word shown right of the title.
+    pub fn label(self) -> &'static str {
+        match self {
+            Status::Waiting => "WAITING",
+            Status::Interrupted => "STOPPED",
+            Status::Done => "DONE",
+            Status::Background => "BG TASK",
+            Status::Working => "WORKING",
+            Status::Unknown => "",
         }
     }
 }
@@ -365,7 +379,15 @@ impl App {
     /// List a just-split pane as a placeholder agent like `like`, and select it.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
-        let p = Agent { status: None, background: false, activity: None, session_only: false, exited: false, ..p };
+        let p = Agent {
+            status: None,
+            elapsed_secs: None,
+            background: false,
+            activity: None,
+            session_only: false,
+            exited: false,
+            ..p
+        };
         self.pending = Some(p.clone());
         let agents = std::mem::take(&mut self.agents);
         self.set_agents(agents);
