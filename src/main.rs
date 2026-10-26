@@ -160,10 +160,10 @@ fn run() -> Result<()> {
                     // selecting text and clicking work as in the pane itself. Only presses and the
                     // wheel must start over the preview; drags and releases always go through so a
                     // selection dragged out of the preview still ends.
-                    let boxed = ui::preview_area(terminal.size()?.into());
-                    let over = m.column > boxed.x && m.row > boxed.y;
+                    let p = ui::preview_area(terminal.size()?.into());
+                    let over = m.column >= p.x && m.row >= p.y;
                     let starts = !matches!(m.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_));
-                    let (x, y) = (m.column.saturating_sub(boxed.x + 1), m.row.saturating_sub(boxed.y + 1));
+                    let (x, y) = (m.column.saturating_sub(p.x), m.row.saturating_sub(p.y));
                     if let (Some(a), Some(seq)) = (app.selected(), app::mouse_seq(m.kind, m.modifiers, x, y))
                         && (over || !starts)
                     {
@@ -201,14 +201,9 @@ fn run() -> Result<()> {
             }
             _ => {}
         }
-        // Point the preview worker at the selected agent, sized to the preview box's inside.
-        let size = terminal.size()?;
-        let boxed = ui::preview_area(size.into());
-        let new_req = app.selected().map(|a| PreviewReq {
-            pane: a.pane_id.clone(),
-            width: boxed.width.saturating_sub(2),
-            height: boxed.height.saturating_sub(2),
-        });
+        // Point the preview worker at the selected agent, sized to the preview.
+        let p = ui::preview_area(terminal.size()?.into());
+        let new_req = app.selected().map(|a| PreviewReq { pane: a.pane_id.clone(), width: p.width, height: p.height });
         if new_req != req {
             req = new_req;
             req_tx.send(PreviewMsg::Req(req.clone()))?;

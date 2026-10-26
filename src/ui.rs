@@ -2,11 +2,9 @@ use crate::app::{self, App};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::time::{Duration, SystemTime};
 use unicode_width::UnicodeWidthChar;
-
-const HINTS: &str = " ? keys · q quit";
 
 const KEYS: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move the selection (or click an agent)"),
@@ -40,25 +38,32 @@ pub fn list_width(width: u16) -> u16 {
     (width as u32 * l.list as u32 / (l.list as u32 + l.preview as u32)) as u16
 }
 
-/// The preview box: everything right of the list.
+/// The agent rows: the list column but for its last row, which holds the mode and key hints.
+fn list_area(area: Rect) -> Rect {
+    Rect { width: list_width(area.width), height: area.height.saturating_sub(1), ..area }
+}
+
+/// Where the preview's text goes: right of the list and the divider line.
 pub fn preview_area(area: Rect) -> Rect {
-    let lw = list_width(area.width);
-    Rect { x: lw, width: area.width - lw, ..area }
+    let x = area.x + list_width(area.width) + 1;
+    Rect { x, width: (area.x + area.width).saturating_sub(x), ..area }
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
-    draw_list(f, app, Rect { width: list_width(area.width), ..area });
+    let list = list_area(area);
+    draw_list(f, app, list);
 
-    let (title, style) = if app.insert {
-        (" INSERT · keys go to the agent · ctrl+q back to list ", Style::new().fg(Color::Green).bold())
+    let (footer, style) = if app.insert {
+        (" INSERT · ctrl+q back to list", Style::new().fg(Color::Green).bold())
     } else {
-        (" PREVIEW · i to type ", Style::new().dim())
+        (" i to type · ? keys · q quit", Style::new().dim())
     };
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(style).title(title);
-    let boxed = preview_area(area);
-    let inner = block.inner(boxed);
-    f.render_widget(block, boxed);
+    let footer_row = Rect { y: list.y + list.height, height: 1, ..list };
+    f.render_widget(Paragraph::new(shorten(footer, list.width as usize)).style(style), footer_row);
+    let inner = preview_area(area);
+    let divider = Rect { x: inner.x - 1, width: 1, ..area };
+    f.render_widget(Block::new().borders(Borders::LEFT).border_style(style), divider);
 
     let Some(p) = app.preview.as_ref().filter(|p| Some(&p.pane) == app.selected().map(|a| &a.pane_id)) else {
         return;
@@ -136,6 +141,7 @@ fn list_offset(rows: &[Row], sel: usize, height: u16) -> usize {
 
 /// The agent drawn at screen row `y` of the list, if any.
 pub fn agent_at(app: &App, area: Rect, y: u16) -> Option<usize> {
+    let area = list_area(area);
     let rows = list_rows(app);
     let off = list_offset(&rows, app.sel, area.height);
     rows.get(off + y.checked_sub(area.y)? as usize)?.2
@@ -147,12 +153,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let off = list_offset(&rows, app.sel, area.height);
     for r in 0..h {
         let row = Rect { y: area.y + r as u16, height: 1, ..area };
-        let Some((text, style, n, color, right)) = rows.get(off + r) else {
-            if r == h - 1 {
-                f.render_widget(Paragraph::new(shorten(HINTS, area.width as usize)).style(Style::new().dim()), row);
-            }
-            continue;
-        };
+        let Some((text, style, n, color, right)) = rows.get(off + r) else { continue };
         let selected = *n == Some(app.sel);
         if selected {
             f.render_widget(Block::new().style(Style::new().bg(SELECTED_BG)), row);
@@ -212,6 +213,24 @@ mod tests {
         assert_eq!(super::shorten("abcd", 3), "ab…");
         assert_eq!(super::shorten(" 🤖 x", 3), " …");
         assert_eq!(super::shorten("abc", 0), "");
+    }
+
+    #[test]
+    fn divider_and_footer() {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 6)).unwrap();
+        for insert in [false, true] {
+            let app = crate::app::App { insert, ..Default::default() };
+            term.draw(|f| super::draw(f, &app)).unwrap();
+            let buf = term.backend().buffer();
+            // The list takes 30% (12 columns), then one column of divider, then the preview.
+            assert!((0..6).all(|y| buf[(12, y)].symbol() == "│"));
+            assert_eq!(super::preview_area(buf.area), ratatui::layout::Rect::new(13, 0, 27, 6));
+            let footer: String = (0..12).map(|x| buf[(x, 5)].symbol()).collect();
+            let want = if insert { " INSERT · c…" } else { " i to type …" };
+            assert_eq!(footer, want);
+            let green = buf[(12, 0)].fg == ratatui::style::Color::Green;
+            assert_eq!(green, insert, "the divider turns green in insert mode");
+        }
     }
 
     #[test]
