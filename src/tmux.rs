@@ -1,6 +1,6 @@
 //! Everything that talks to tmux and workmux, plus the background workers that do it.
 
-use crate::app::{self, Agent, Preview};
+use crate::app::{self, Agent, MouseClass, Preview};
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -363,9 +363,88 @@ pub fn send_key(pane: &str, key: &str) {
     tmux(&["send-keys", "-t", pane, key]);
 }
 
-/// Type `text` into the pane as is, escape sequences included.
-pub fn send_text(pane: &str, text: &str) {
-    tmux(&["send-keys", "-t", pane, "-l", text]);
+/// A mouse event for a pane, as the SGR sequence to type into it.
+pub struct MouseReq {
+    pub pane: String,
+    pub seq: String,
+    pub class: MouseClass,
+}
+
+/// The mouse reporting a pane's program asked tmux for.
+#[derive(Clone, Copy, Default)]
+struct MouseModes {
+    /// Presses, releases and the wheel (1000).
+    any: bool,
+    /// Motion with a button held (1002).
+    button: bool,
+    /// All motion (1003).
+    all: bool,
+    /// Reported in SGR form (1006); the only form we speak.
+    sgr: bool,
+}
+
+impl MouseModes {
+    fn of(pane: &str) -> Self {
+        let fmt = "#{mouse_any_flag}#{mouse_all_flag}#{mouse_button_flag}#{mouse_sgr_flag}";
+        let out = tmux(&["display", "-p", "-t", pane, fmt]).unwrap_or_default();
+        let f: Vec<bool> = out.trim().chars().map(|c| c == '1').collect();
+        match f[..] {
+            [any, all, button, sgr] => MouseModes { any, all, button: button || all, sgr },
+            _ => MouseModes::default(),
+        }
+    }
+
+    /// Whether the program wants an event of this class. A program that did not ask would
+    /// get the sequence typed at it as text.
+    fn wants(&self, class: MouseClass) -> bool {
+        self.sgr
+            && match class {
+                MouseClass::Move => self.all,
+                MouseClass::Drag => self.button,
+                MouseClass::Other => self.any,
+            }
+    }
+}
+
+/// Shrink a run of motion events on one pane to the last of them; everything else stays in order.
+fn coalesce(reqs: impl IntoIterator<Item = MouseReq>) -> Vec<MouseReq> {
+    let mut out: Vec<MouseReq> = Vec::new();
+    for r in reqs {
+        match out.last_mut() {
+            Some(last) if last.pane == r.pane && last.class.is_motion() && r.class.is_motion() => *last = r,
+            _ => out.push(r),
+        }
+    }
+    out
+}
+
+/// Type mouse events into panes. Running tmux per event on the main loop made dragging lag, and
+/// would make hovering worse, so events queue up here: whatever is waiting goes out in one
+/// `send-keys` per pane, with runs of motion cut down to the latest position.
+pub fn mouse_worker(rx: Receiver<MouseReq>) {
+    const MODES_FRESH: Duration = Duration::from_millis(300);
+    let mut modes: Option<(String, Instant, MouseModes)> = None;
+    while let Ok(first) = rx.recv() {
+        let reqs = coalesce(std::iter::once(first).chain(rx.try_iter()));
+        let mut i = 0;
+        while i < reqs.len() {
+            let pane = &reqs[i].pane;
+            let end = reqs[i..].iter().position(|r| &r.pane != pane).map_or(reqs.len(), |n| i + n);
+            let m = match &modes {
+                Some((p, at, m)) if p == pane && at.elapsed() < MODES_FRESH => *m,
+                _ => {
+                    let m = MouseModes::of(pane);
+                    modes = Some((pane.clone(), Instant::now(), m));
+                    m
+                }
+            };
+            let text: String = reqs[i..end].iter().filter(|r| m.wants(r.class)).map(|r| r.seq.as_str()).collect();
+            if !text.is_empty() {
+                tmux(&["send-keys", "-t", pane, "-l", &text]);
+            }
+            i = end;
+        }
+    }
 }
 
 /// Paste as the terminal would: bracketed if the agent asked for it.
@@ -393,5 +472,40 @@ mod tests {
         // One pane short: the batch can't be trusted.
         assert_eq!(super::split_captures(out, 3), None);
         assert_eq!(super::split_captures("", 0), Some(vec![]));
+    }
+
+    #[test]
+    fn mouse_batches() {
+        use crate::app::MouseClass::{self, *};
+        let req =
+            |pane: &str, seq: &str, class: MouseClass| super::MouseReq { pane: pane.into(), seq: seq.into(), class };
+        let out = super::coalesce([
+            req("%1", "a", Other),
+            req("%1", "b", Move),
+            req("%1", "c", Drag),
+            req("%1", "d", Drag),
+            req("%1", "e", Other),
+            req("%1", "f", Other),
+            req("%2", "g", Drag),
+            req("%1", "h", Drag),
+        ]);
+        let seqs: Vec<_> = out.iter().map(|r| r.seq.as_str()).collect();
+        assert_eq!(seqs, ["a", "d", "e", "f", "g", "h"]);
+    }
+
+    #[test]
+    fn mouse_wants() {
+        use crate::app::MouseClass::*;
+        let m = |any, all, button, sgr| super::MouseModes { any, all, button: button || all, sgr };
+        let hover = m(true, true, false, true);
+        assert!(hover.wants(Move) && hover.wants(Drag) && hover.wants(Other));
+        let drag = m(true, false, true, true);
+        assert!(!drag.wants(Move) && drag.wants(Drag) && drag.wants(Other));
+        let click = m(true, false, false, true);
+        assert!(!click.wants(Move) && !click.wants(Drag) && click.wants(Other));
+        // No mouse mode, or not in SGR form: nothing is sent.
+        let off = m(false, false, false, false);
+        assert!(!off.wants(Other));
+        assert!(!m(true, true, true, false).wants(Other));
     }
 }

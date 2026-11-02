@@ -236,9 +236,34 @@ pub fn is_blank(line: &str) -> bool {
     true
 }
 
+/// What a mouse event needs from the agent's pane to be of any use to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseClass {
+    /// Motion with no button: only agents that asked for all motion (hover) want it.
+    Move,
+    /// Motion with a button held: wanted by button-motion and all-motion agents.
+    Drag,
+    /// Presses, releases and the wheel: wanted by any agent with mouse mode on.
+    Other,
+}
+
+impl MouseClass {
+    pub fn of(kind: MouseEventKind) -> Self {
+        match kind {
+            MouseEventKind::Moved => Self::Move,
+            MouseEventKind::Drag(_) => Self::Drag,
+            _ => Self::Other,
+        }
+    }
+
+    /// The next motion event supersedes this one, so a backlog of them shrinks to the last.
+    pub fn is_motion(self) -> bool {
+        self != Self::Other
+    }
+}
+
 /// A mouse event at 0-based (`x`, `y`) in SGR form, as a terminal sends it to a program.
-/// None for plain moves, which nothing in the agent needs.
-pub fn mouse_seq(kind: MouseEventKind, mods: KeyModifiers, x: u16, y: u16) -> Option<String> {
+pub fn mouse_seq(kind: MouseEventKind, mods: KeyModifiers, x: u16, y: u16) -> String {
     let button = |b| match b {
         MouseButton::Left => 0,
         MouseButton::Middle => 1,
@@ -252,14 +277,15 @@ pub fn mouse_seq(kind: MouseEventKind, mods: KeyModifiers, x: u16, y: u16) -> Op
         MouseEventKind::ScrollDown => (65, 'M'),
         MouseEventKind::ScrollLeft => (66, 'M'),
         MouseEventKind::ScrollRight => (67, 'M'),
-        MouseEventKind::Moved => return None,
+        // Button 3 is "no button", plus the motion bit.
+        MouseEventKind::Moved => (3 + 32, 'M'),
     };
     for (m, bit) in [(KeyModifiers::SHIFT, 4), (KeyModifiers::ALT, 8), (KeyModifiers::CONTROL, 16)] {
         if mods.contains(m) {
             code += bit;
         }
     }
-    Some(format!("\x1b[<{code};{};{}{end}", x + 1, y + 1))
+    format!("\x1b[<{code};{};{}{end}", x + 1, y + 1)
 }
 
 /// Drop OSC sequences, like OSC 8 links (`ESC ] … ESC \` or `… BEL`). ansi-to-tui stops parsing the
@@ -632,13 +658,13 @@ mod tests {
     fn mouse_seq() {
         let seq = |k, m| super::mouse_seq(k, m, 9, 4);
         let none = KeyModifiers::NONE;
-        assert_eq!(super::mouse_seq(MouseEventKind::ScrollUp, none, 0, 0).unwrap(), "\x1b[<64;1;1M");
-        assert_eq!(seq(MouseEventKind::ScrollDown, none).unwrap(), "\x1b[<65;10;5M");
-        assert_eq!(seq(MouseEventKind::Down(MouseButton::Left), none).unwrap(), "\x1b[<0;10;5M");
-        assert_eq!(seq(MouseEventKind::Drag(MouseButton::Left), none).unwrap(), "\x1b[<32;10;5M");
-        assert_eq!(seq(MouseEventKind::Up(MouseButton::Left), none).unwrap(), "\x1b[<0;10;5m");
-        assert_eq!(seq(MouseEventKind::Down(MouseButton::Right), KeyModifiers::SHIFT).unwrap(), "\x1b[<6;10;5M");
-        assert_eq!(seq(MouseEventKind::Moved, none), None);
+        assert_eq!(super::mouse_seq(MouseEventKind::ScrollUp, none, 0, 0), "\x1b[<64;1;1M");
+        assert_eq!(seq(MouseEventKind::ScrollDown, none), "\x1b[<65;10;5M");
+        assert_eq!(seq(MouseEventKind::Down(MouseButton::Left), none), "\x1b[<0;10;5M");
+        assert_eq!(seq(MouseEventKind::Drag(MouseButton::Left), none), "\x1b[<32;10;5M");
+        assert_eq!(seq(MouseEventKind::Up(MouseButton::Left), none), "\x1b[<0;10;5m");
+        assert_eq!(seq(MouseEventKind::Down(MouseButton::Right), KeyModifiers::SHIFT), "\x1b[<6;10;5M");
+        assert_eq!(seq(MouseEventKind::Moved, none), "\x1b[<35;10;5M");
     }
 
     #[test]

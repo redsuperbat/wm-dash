@@ -118,8 +118,12 @@ fn run() -> Result<()> {
         }
     });
     std::thread::spawn(move || input_worker(tx, pause_rx));
+    let (mouse_tx, mouse_rx) = mpsc::channel();
+    std::thread::spawn(move || tmux::mouse_worker(mouse_rx));
 
     let mut app = App::default();
+    // A mouse press started over the preview and has not been released.
+    let mut grabbed = false;
     let mut req = None;
     terminal.draw(|f| ui::draw(f, &app))?;
     // The list as last drawn: a tick redraws only when a spinner frame or an age changed it.
@@ -130,7 +134,7 @@ fn run() -> Result<()> {
         let mut action = None;
         // Block for the next message, then take whatever else is queued before drawing once.
         for msg in std::iter::once(rx.recv()?).chain(rx.try_iter()) {
-            // Mouse moves reach the agent as nothing and change nothing on screen.
+            // Mouse moves change nothing on screen.
             let moved = matches!(&msg, Msg::Term(Event::Mouse(m)) if m.kind == MouseEventKind::Moved);
             dirty |= !matches!(msg, Msg::Tick) && !moved;
             match msg {
@@ -148,7 +152,9 @@ fn run() -> Result<()> {
                 Msg::ListError(e) => app.error = Some(e),
                 Msg::Preview(p) => app.preview = Some(p),
                 Msg::Tick => tick = true,
-                Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => action = handle_key(&mut app, k),
+                Msg::Term(Event::Key(k)) if k.kind != KeyEventKind::Release => {
+                    action = handle_key(&mut app, k, &mouse_tx)
+                }
                 Msg::Term(Event::Paste(text)) if app.insert => {
                     if let Some(a) = app.selected() {
                         tmux::paste(&a.pane_id, &text);
@@ -159,23 +165,38 @@ fn run() -> Result<()> {
                         && m.column < ui::list_width(terminal.size()?.width) =>
                 {
                     // A click in the list selects the agent under it.
+                    grabbed = false;
                     if let Some(n) = ui::agent_at(&app, terminal.size()?.into(), m.row) {
                         app.sel = n;
                     }
                 }
                 Msg::Term(Event::Mouse(m)) => {
                     // Pass the mouse to the agent at the same spot inside its pane, so scrolling,
-                    // selecting text and clicking work as in the pane itself. Only presses and the
-                    // wheel must start over the preview; drags and releases always go through so a
-                    // selection dragged out of the preview still ends.
+                    // hovering, selecting text and clicking work as in the pane itself. Presses,
+                    // moves and the wheel must be over the preview. Drags and releases follow a
+                    // press that started there, wherever they go, so a selection dragged out of
+                    // the preview still ends.
                     let p = ui::preview_area(terminal.size()?.into());
-                    let over = m.column >= p.x && m.row >= p.y;
-                    let starts = !matches!(m.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_));
-                    let (x, y) = (m.column.saturating_sub(p.x), m.row.saturating_sub(p.y));
-                    if let (Some(a), Some(seq)) = (app.selected(), app::mouse_seq(m.kind, m.modifiers, x, y))
-                        && (over || !starts)
+                    let over = p.contains((m.column, m.row).into());
+                    let send = match m.kind {
+                        MouseEventKind::Drag(_) => grabbed,
+                        MouseEventKind::Up(_) => std::mem::take(&mut grabbed),
+                        MouseEventKind::Down(_) => {
+                            grabbed = over;
+                            over
+                        }
+                        _ => over,
+                    };
+                    if let Some(a) = app.selected()
+                        && send
                     {
-                        tmux::send_text(&a.pane_id, &seq);
+                        let x = m.column.saturating_sub(p.x).min(p.width.saturating_sub(1));
+                        let y = m.row.saturating_sub(p.y).min(p.height.saturating_sub(1));
+                        let _ = mouse_tx.send(tmux::MouseReq {
+                            pane: a.pane_id.clone(),
+                            seq: app::mouse_seq(m.kind, m.modifiers, x, y),
+                            class: app::MouseClass::of(m.kind),
+                        });
                     }
                 }
                 Msg::Term(_) => {}
@@ -227,7 +248,7 @@ fn run() -> Result<()> {
     }
 }
 
-fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
+fn handle_key(app: &mut App, k: KeyEvent, mouse: &Sender<tmux::MouseReq>) -> Option<Action> {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     if app.insert {
         if ctrl && k.code == KeyCode::Char('q') {
@@ -272,8 +293,12 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<Action> {
         // Line steps, as in vim: one mouse wheel notch, as over the preview.
         KeyCode::Char(c @ ('y' | 'e')) if ctrl => {
             let wheel = if c == 'y' { MouseEventKind::ScrollUp } else { MouseEventKind::ScrollDown };
-            if let (Some(a), Some(seq)) = (app.selected(), app::mouse_seq(wheel, KeyModifiers::NONE, 0, 0)) {
-                tmux::send_text(&a.pane_id, &seq);
+            if let Some(a) = app.selected() {
+                let _ = mouse.send(tmux::MouseReq {
+                    pane: a.pane_id.clone(),
+                    seq: app::mouse_seq(wheel, KeyModifiers::NONE, 0, 0),
+                    class: app::MouseClass::Other,
+                });
             }
         }
         _ if ctrl => {}
@@ -409,7 +434,7 @@ mod tests {
     use super::*;
 
     fn press(app: &mut App, code: KeyCode) -> Option<Action> {
-        handle_key(app, KeyEvent::new(code, KeyModifiers::NONE))
+        handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), &mpsc::channel().0)
     }
 
     #[test]
