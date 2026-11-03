@@ -447,7 +447,7 @@ impl App {
         }
     }
 
-    /// List a just-split pane as a placeholder agent like `like`, and select it.
+    /// List a just-split pane as a placeholder agent like `like`, select it and enter insert mode.
     pub fn add_pending(&mut self, like: &Agent, pane: String) {
         let p = Agent { pane_id: pane, title: Some("starting…".into()), ..like.clone() };
         // It starts in the main checkout (see tmux::new_agent), not in `like`'s worktree.
@@ -469,6 +469,7 @@ impl App {
         let agents = std::mem::take(&mut self.all);
         self.set_agents(agents);
         self.sel = self.agents.iter().position(|a| a.pane_id == p.pane_id).unwrap_or(self.sel);
+        self.insert = self.selected().is_some_and(|a| a.pane_id == p.pane_id);
     }
 
     /// Select the next agent that needs you (waiting, stopped, done or no status), after the
@@ -771,11 +772,13 @@ mod tests {
         app.set_agents(vec![agent("%1", "", "a", "1"), agent("%2", "", "a", "2")]);
         app.add_pending(&app.agents[0].clone(), "%5".into());
         assert_eq!(app.selected().unwrap().pane_id, "%5");
+        assert!(app.insert, "a new agent opens in insert mode");
         // Not listed by workmux yet: the placeholder stays, and stays selected.
         app.set_agents(vec![agent("%1", "", "a", "1"), agent("%2", "", "a", "2")]);
         assert_eq!(app.selected().unwrap().title.as_deref(), Some("starting…"));
         app.set_agents(vec![agent("%1", "", "a", "1"), agent("%5", "working", "a", "1")]);
         assert_eq!(app.selected().unwrap().status(), Status::Working);
         assert!(app.pending.is_none());
+        assert!(app.insert, "still in insert mode once workmux lists it");
     }
 }
