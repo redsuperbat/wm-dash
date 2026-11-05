@@ -254,16 +254,19 @@ pub fn stop_watching() {
 /// detect changes) and the parsed preview.
 fn capture(r: &PreviewReq) -> Option<(String, Preview)> {
     let fmt = "#{pane_id} #{pane_width} #{pane_height} #{window_width} #{window_height} \
-               #{cursor_x} #{cursor_y} #{cursor_flag}";
+               #{cursor_x} #{cursor_y} #{cursor_flag} #{window_active_clients}";
     let out = tmux(&["display", "-p", "-t", &r.pane, fmt, ";", "capture-pane", "-ep", "-t", &r.pane])?;
     let (head, body) = out.split_once('\n')?;
     let f: Vec<&str> = head.split(' ').collect();
     // The id check skips agents whose pane is gone.
-    if f.len() != 8 || f[0] != r.pane {
+    if f.len() != 9 || f[0] != r.pane {
         return None;
     }
     let n: Vec<u16> = f[1..].iter().map(|s| s.parse().unwrap_or(0)).collect();
-    fit(Some(&r.pane), r.width, r.height, Some([n[0], n[1], n[2], n[3]]));
+    // A window a client shows (behind our popup, say) is left alone: fitted wider than the
+    // terminal, it sends tmux 3.7 into an endless redraw at full CPU.
+    let viewed = n[7] > 0;
+    fit(Some(r.pane.as_str()).filter(|_| !viewed), r.width, r.height, Some([n[0], n[1], n[2], n[3]]));
     let (cx, cy, visible) = (n[4], n[5] as usize, n[6] == 1);
 
     let lines: Vec<&str> = body.lines().collect();
